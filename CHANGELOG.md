@@ -6,6 +6,25 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-08-23
+
+### Changed
+- FSEvents debounce bumped 150 ms → 500 ms. With the ignored-subtree
+  filter in place, missing a beat by a few hundred ms is invisible;
+  the tighter window was more of a burst-multiplier than a
+  responsiveness win.
+- Background scan slow-log threshold reverted to `PerfLog.slowBlockThreshold`
+  (50 ms) — with fewer bogus scans, the finer threshold is useful signal
+  again rather than noise.
+
+### Added
+- **`[fsevents] rescan: N path(s): a.md, b/c.md, …`** log line whenever
+  a change batch survives the ignored-subtree filter. Basename-relative
+  paths + count + `(+K more)` suffix. Lets you see what actually
+  triggered a rescan (Time Machine snapshot? git background gc?
+  Spotlight metadata? one of *your* saves?) without dumping full
+  paths.
+
 ## [0.6.7] - 2026-08-23
 
 ### Changed

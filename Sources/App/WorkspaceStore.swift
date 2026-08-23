@@ -176,9 +176,7 @@ final class WorkspaceStore: ObservableObject {
             let started = CFAbsoluteTimeGetCurrent()
             let node = Self.scan(url: url, ignore: matcher)
             let elapsed = CFAbsoluteTimeGetCurrent() - started
-            if elapsed > 0.5 {
-                // Only warn when a *background* scan is genuinely slow — the
-                // 50 ms main-thread threshold is way too chatty for tree walks.
+            if elapsed > PerfLog.slowBlockThreshold {
                 PerfLog.write("⚠️ [slow] WorkspaceStore.scan(\(url.lastPathComponent)): \(PerfLog.ms(elapsed)) ms (background, \(matcher.patterns.count) gitignore rules)")
             }
             DispatchQueue.main.async {
@@ -246,9 +244,26 @@ final class WorkspaceStore: ObservableObject {
         watcher = FileTreeWatcher(url: rootURL) { [weak self] paths in
             guard let self else { return }
             if self.shouldRescan(for: paths) {
+                Self.logFSEventTrigger(paths: paths, rootURL: self.rootURL)
                 self.refresh()
             }
         }
+    }
+
+    /// Print who fired the rescan. Basename-only sample plus the count so we
+    /// can spot noisy sources (git, IDE, Time Machine, Spotlight) without
+    /// dumping full paths.
+    private static func logFSEventTrigger(paths: [String], rootURL: URL) {
+        let rootPath = rootURL.standardizedFileURL.path
+        let sample = paths.prefix(4).map { p -> String in
+            let std = URL(fileURLWithPath: p).standardizedFileURL.path
+            if std.hasPrefix(rootPath + "/") {
+                return String(std.dropFirst(rootPath.count + 1))
+            }
+            return std
+        }.joined(separator: ", ")
+        let more = paths.count > 4 ? " (+\(paths.count - 4) more)" : ""
+        PerfLog.write("[fsevents] rescan: \(paths.count) path(s): \(sample)\(more)")
     }
 
     // MARK: - Filesystem ops

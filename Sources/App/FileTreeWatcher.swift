@@ -102,8 +102,10 @@ final class FileTreeWatcher {
             self.onChange(batch)
         }
         pending = work
-        // Extra 150 ms on top of FSEvents' own latency to collapse busy repos
-        // (git background ops, bazel cache churn) into one batch.
-        debounceQueue.asyncAfter(deadline: .now() + 0.15, execute: work)
+        // 500 ms of quiet on top of FSEvents' own 200 ms latency before we
+        // decide a burst is done. Chosen to collapse the tail of a git
+        // checkout / bazel build without noticeably delaying reaction to a
+        // one-off save.
+        debounceQueue.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 }
