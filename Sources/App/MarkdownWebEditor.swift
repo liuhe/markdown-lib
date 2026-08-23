@@ -1,11 +1,13 @@
 import SwiftUI
 import WebKit
+import AppKit
 
 /// WKWebView + Toast UI Editor 的 WYSIWYG markdown 编辑器。
 /// 存储层还是 markdown 文本；WKWebView 侧持有富文本编辑体验。
 /// 把 CSS/JS 直接内联进 HTML 再 loadHTMLString，避免 file:// 的 CORS 限制。
 struct MarkdownWebEditor: NSViewRepresentable {
     @Binding var markdown: String
+    let bridge: EditorBridge
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -18,10 +20,14 @@ struct MarkdownWebEditor: NSViewRepresentable {
         // 右键 → Inspect Element / Cmd+Alt+I 打开 Web Inspector
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = DropForwardingWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
         webView.navigationDelegate = context.coordinator
+        webView.dropHandler = { url in
+            (NSApp.delegate as? AppDelegate)?.openFile(at: url)
+        }
         context.coordinator.webView = webView
+        bridge.webView = webView
 
         webView.loadHTMLString(Self.buildInlinedHTML(), baseURL: nil)
         return webView
@@ -52,6 +58,8 @@ struct MarkdownWebEditor: NSViewRepresentable {
         html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
         #editor { height: 100%; }
         .toastui-editor-defaultUI { border: none; }
+        .md-search-hit { background: rgba(255, 213, 0, 0.45); border-radius: 2px; }
+        .md-search-hit-current { background: rgba(255, 149, 0, 0.75); border-radius: 2px; }
         </style>
         </head>
         <body>
@@ -77,7 +85,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
             ]
           });
 
-          // 剥掉"整行只有 <br>"的行 —— Toast UI WYSIWYG 里空段落序列化成这个，
+          // 剥掉“整行只有 <br>”的行 —— Toast UI WYSIWYG 里空段落序列化成这个，
           // 但反过来解析时不生成可放光标的块，会让退格跨过整段删掉上面的列表项
           function normalizeMarkdown(md) {
             if (typeof md !== 'string') return md;
@@ -151,6 +159,8 @@ struct MarkdownWebEditor: NSViewRepresentable {
             if (md === lastPushed) return;
             lastPushed = md;
             window.webkit.messageHandlers.editor.postMessage({ type: 'change', md: md });
+            // 内容改了就清掉当前的搜索高亮，避免残留 span
+            clearSearchHighlights();
           });
 
           window.setMarkdown = function (md) {
@@ -160,6 +170,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
             lastPushed = md;
             suppressChange = true;
             try { editor.setMarkdown(md, false); } finally { suppressChange = false; }
+            clearSearchHighlights();
           };
 
           // Toast UI 输出的 URL 里 & 被写成 &amp;（HTML 实体），做一次解码
@@ -309,6 +320,202 @@ struct MarkdownWebEditor: NSViewRepresentable {
             } catch (err) {}
           }, true);
 
+          // ---- Search / Replace --------------------------------------------------
+
+          var searchState = { query: '', hits: [], current: -1 };
+
+          function clearSearchHighlights() {
+            var root = wwRoot();
+            if (!root) return;
+            var spans = root.querySelectorAll('span.md-search-hit, span.md-search-hit-current');
+            for (var i = 0; i < spans.length; i++) {
+              var s = spans[i];
+              var parent = s.parentNode;
+              while (s.firstChild) parent.insertBefore(s.firstChild, s);
+              parent.removeChild(s);
+              parent.normalize();
+            }
+            searchState = { query: '', hits: [], current: -1 };
+          }
+
+          function highlightMatches(query) {
+            clearSearchHighlights();
+            if (!query) {
+              report();
+              return;
+            }
+            var root = wwRoot();
+            if (!root) { report(); return; }
+            var q = query.toLowerCase();
+            var qLen = query.length;
+
+            // Snapshot text nodes first — mutating them while walking causes chaos.
+            var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+              acceptNode: function (n) {
+                // Skip nodes inside code blocks? No — search everywhere the user can see text.
+                if (!n.nodeValue) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              }
+            });
+            var nodes = [];
+            var n;
+            while ((n = walker.nextNode())) nodes.push(n);
+
+            var hits = [];
+            for (var i = 0; i < nodes.length; i++) {
+              var node = nodes[i];
+              var text = node.nodeValue;
+              var lower = text.toLowerCase();
+              var idx = 0;
+              var localHits = [];
+              while (true) {
+                var found = lower.indexOf(q, idx);
+                if (found < 0) break;
+                localHits.push(found);
+                idx = found + qLen;
+              }
+              if (!localHits.length) continue;
+
+              // Split the text node into runs of text + <span> highlights.
+              var parent = node.parentNode;
+              var cursor = 0;
+              var fragment = document.createDocumentFragment();
+              for (var j = 0; j < localHits.length; j++) {
+                var start = localHits[j];
+                if (start > cursor) {
+                  fragment.appendChild(document.createTextNode(text.substring(cursor, start)));
+                }
+                var span = document.createElement('span');
+                span.className = 'md-search-hit';
+                span.appendChild(document.createTextNode(text.substr(start, qLen)));
+                fragment.appendChild(span);
+                hits.push(span);
+                cursor = start + qLen;
+              }
+              if (cursor < text.length) {
+                fragment.appendChild(document.createTextNode(text.substring(cursor)));
+              }
+              parent.replaceChild(fragment, node);
+            }
+
+            searchState = { query: query, hits: hits, current: hits.length ? 0 : -1 };
+            markCurrent();
+            scrollCurrentIntoView();
+            report();
+          }
+
+          function markCurrent() {
+            for (var i = 0; i < searchState.hits.length; i++) {
+              searchState.hits[i].className = (i === searchState.current)
+                ? 'md-search-hit md-search-hit-current'
+                : 'md-search-hit';
+            }
+          }
+
+          function scrollCurrentIntoView() {
+            if (searchState.current < 0) return;
+            var el = searchState.hits[searchState.current];
+            if (el && el.scrollIntoView) {
+              el.scrollIntoView({ block: 'center', inline: 'nearest' });
+            }
+          }
+
+          function report() {
+            window.webkit.messageHandlers.editor.postMessage({
+              type: 'searchResult',
+              count: searchState.hits.length,
+              index: searchState.current + 1
+            });
+          }
+
+          window.mdSearch = function (query, scrollToFirst) {
+            highlightMatches(query || '');
+          };
+
+          window.mdClearSearch = function () {
+            clearSearchHighlights();
+            report();
+          };
+
+          window.mdFindStep = function (delta) {
+            if (!searchState.hits.length) { report(); return; }
+            var n = searchState.hits.length;
+            searchState.current = ((searchState.current + delta) % n + n) % n;
+            markCurrent();
+            scrollCurrentIntoView();
+            report();
+          };
+
+          // Replace / Replace All go through ProseMirror so undo history + markdown
+          // serialization stay consistent.
+          function pmReplaceRange(from, to, text) {
+            var wwEditor = editor.getCurrentModeEditor();
+            var view = wwEditor && wwEditor.view;
+            if (!view) return false;
+            var tr = view.state.tr.insertText(text, from, to);
+            view.dispatch(tr);
+            return true;
+          }
+
+          function pmDocRangeForSpan(span) {
+            var wwEditor = editor.getCurrentModeEditor();
+            var view = wwEditor && wwEditor.view;
+            if (!view) return null;
+            // The span wraps a single text node. Locate its DOM position, then map
+            // to ProseMirror doc positions.
+            var textNode = span.firstChild;
+            if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return null;
+            try {
+              var from = view.posAtDOM(textNode, 0);
+              var to = view.posAtDOM(textNode, textNode.nodeValue.length);
+              if (from == null || to == null || from < 0 || to < 0) return null;
+              return { from: from, to: to };
+            } catch (err) {
+              return null;
+            }
+          }
+
+          window.mdReplace = function (replacement) {
+            if (!searchState.hits.length || searchState.current < 0) return;
+            var span = searchState.hits[searchState.current];
+            var range = pmDocRangeForSpan(span);
+            if (!range) return;
+            var q = searchState.query;
+            var indexInList = searchState.current;
+            pmReplaceRange(range.from, range.to, replacement || '');
+            // Re-run search to rebuild the hit list, then advance to the next one.
+            setTimeout(function () {
+              highlightMatches(q);
+              if (searchState.hits.length) {
+                searchState.current = Math.min(indexInList, searchState.hits.length - 1);
+                markCurrent();
+                scrollCurrentIntoView();
+                report();
+              }
+            }, 0);
+          };
+
+          window.mdReplaceAll = function (replacement) {
+            if (!searchState.hits.length) return;
+            var q = searchState.query;
+            // Collect DOM ranges first (positions shift as we edit).
+            var spans = searchState.hits.slice();
+            var wwEditor = editor.getCurrentModeEditor();
+            var view = wwEditor && wwEditor.view;
+            if (!view) return;
+            // Walk from the end so earlier ranges stay valid.
+            for (var i = spans.length - 1; i >= 0; i--) {
+              var range = pmDocRangeForSpan(spans[i]);
+              if (!range) continue;
+              var tr = view.state.tr.insertText(replacement || '', range.from, range.to);
+              view.dispatch(tr);
+            }
+            setTimeout(function () {
+              highlightMatches(q);
+              report();
+            }, 0);
+          };
+
           window.webkit.messageHandlers.editor.postMessage({ type: 'ready' });
         })();
         </script>
@@ -370,6 +577,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
             switch type {
             case "ready":
                 ready = true
+                parent.bridge.isEditorReady = true
                 let md = pendingMarkdown ?? parent.markdown
                 if let wv = webView { push(md, to: wv) }
                 pendingMarkdown = nil
@@ -382,6 +590,11 @@ struct MarkdownWebEditor: NSViewRepresentable {
                 if let s = dict["url"] as? String, let url = URL(string: s) {
                     NSWorkspace.shared.open(url)
                 }
+            case "searchResult":
+                let count = (dict["count"] as? Int) ?? 0
+                let index = (dict["index"] as? Int) ?? 0
+                let bridge = parent.bridge
+                DispatchQueue.main.async { bridge.updateSearchResult(count: count, index: index) }
             default: break
             }
         }
@@ -415,5 +628,49 @@ struct MarkdownWebEditor: NSViewRepresentable {
             out += "\""
             return out
         }
+    }
+}
+
+/// WKWebView subclass that forwards file-URL drops to the app delegate so they
+/// open in a window instead of trying to load inside the editor.
+final class DropForwardingWebView: WKWebView {
+    var dropHandler: ((URL) -> Void)?
+
+    override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frameRect, configuration: configuration)
+        registerForDraggedTypes([.fileURL])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        hasMarkdownFiles(sender) ? .copy : []
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        hasMarkdownFiles(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] else {
+            return false
+        }
+        var handled = false
+        for url in urls where isMarkdownURL(url) {
+            dropHandler?(url)
+            handled = true
+        }
+        return handled
+    }
+
+    private func hasMarkdownFiles(_ sender: NSDraggingInfo) -> Bool {
+        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] else {
+            return false
+        }
+        return urls.contains(where: isMarkdownURL)
+    }
+
+    private func isMarkdownURL(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ["md", "markdown", "mdown", "mkd", "txt"].contains(ext)
     }
 }

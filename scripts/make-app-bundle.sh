@@ -1,14 +1,15 @@
 #!/bin/bash
-# Package the release-built binary into a minimal markdown-lib.app bundle.
-# Usage: bash scripts/make-app-bundle.sh <version> [binary-path]
-#
-# If binary-path is omitted, defaults to .build/release/markdown-lib.
+# Build, package, codesign (ad-hoc) and install the markdown-lib.app bundle.
+# Usage: bash scripts/make-app-bundle.sh [version]
 set -euo pipefail
 
 VERSION="${1:-0.0.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-BIN="${2:-$ROOT/.build/release/markdown-lib}"
+echo "==> swift build -c release"
+(cd "$ROOT" && swift build -c release)
+
+BIN="$ROOT/.build/release/markdown-lib"
 if [ ! -x "$BIN" ]; then
     echo "Binary not found at $BIN" >&2
     exit 1
@@ -26,8 +27,32 @@ BUNDLE_NAME="markdown-lib_markdown-lib.bundle"
 BUNDLE_SRC="$(dirname "$BIN")/${BUNDLE_NAME}"
 if [ -d "$BUNDLE_SRC" ]; then
     cp -R "$BUNDLE_SRC" "$APP/Contents/MacOS/"
+    # SwiftPM emits a flat resource bundle without an Info.plist, but codesign
+    # insists on both Contents/Info.plist and Contents/Resources/. Repackage in
+    # place so `codesign --deep` accepts it while Bundle.module can still find
+    # the toastui assets.
+    RES_BUNDLE="$APP/Contents/MacOS/${BUNDLE_NAME}"
+    if [ -d "$RES_BUNDLE/Resources" ] && [ ! -d "$RES_BUNDLE/Contents/Resources" ]; then
+        mkdir -p "$RES_BUNDLE/Contents"
+        mv "$RES_BUNDLE/Resources" "$RES_BUNDLE/Contents/Resources"
+    fi
+    cat > "$RES_BUNDLE/Contents/Info.plist" <<BPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>com.liuhe.markdown-lib.resources</string>
+    <key>CFBundleName</key><string>markdown-lib_markdown-lib</string>
+    <key>CFBundlePackageType</key><string>BNDL</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+    <key>CFBundleVersion</key><string>${VERSION}</string>
+</dict>
+</plist>
+BPLIST
 fi
 
+# Bundle an app icon if present at the repo root.
 if [ -f "$ROOT/AppIcon.icns" ]; then
     cp "$ROOT/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
@@ -48,6 +73,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
@@ -57,12 +83,56 @@ cat > "$APP/Contents/Info.plist" <<PLIST
             <key>LSItemContentTypes</key>
             <array>
                 <string>net.daringfireball.markdown</string>
+                <string>com.liuhe.markdown-lib.markdown</string>
                 <string>public.plain-text</string>
             </array>
+        </dict>
+    </array>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.liuhe.markdown-lib.markdown</string>
+            <key>UTTypeDescription</key><string>Markdown Document</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>md</string>
+                    <string>markdown</string>
+                    <string>mdown</string>
+                    <string>mkd</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>text/markdown</string>
+                </array>
+            </dict>
         </dict>
     </array>
 </dict>
 </plist>
 PLIST
 
-echo "Built $APP"
+# Ad-hoc codesign so Gatekeeper doesn't block launch on first run.
+echo "==> codesign --force --deep --sign -"
+codesign --force --deep --sign - "$APP"
+
+# Install to ~/Applications so Launch Services + Dock pick it up.
+INSTALL_DIR="$HOME/Applications"
+mkdir -p "$INSTALL_DIR"
+INSTALL_PATH="$INSTALL_DIR/markdown-lib.app"
+rm -rf "$INSTALL_PATH"
+cp -R "$APP" "$INSTALL_PATH"
+
+# Nudge Launch Services so the file associations take effect immediately.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREGISTER" ]; then
+    "$LSREGISTER" -f "$INSTALL_PATH" || true
+fi
+
+echo "Built  $APP"
+echo "Installed $INSTALL_PATH"
