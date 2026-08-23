@@ -1,28 +1,28 @@
 #!/bin/bash
-# Package the release-built binary into a minimal markdown-editor.app bundle.
+# Package the release-built binary into a minimal markdown-lib.app bundle.
 # Usage: bash scripts/make-app-bundle.sh <version> [binary-path]
 #
-# If binary-path is omitted, defaults to .build/release/markdown-editor.
+# If binary-path is omitted, defaults to .build/release/markdown-lib.
 set -euo pipefail
 
 VERSION="${1:-0.0.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-BIN="${2:-$ROOT/.build/release/markdown-editor}"
+BIN="${2:-$ROOT/.build/release/markdown-lib}"
 if [ ! -x "$BIN" ]; then
     echo "Binary not found at $BIN" >&2
     exit 1
 fi
 
 DIST="$ROOT/dist"
-APP="$DIST/markdown-editor.app"
+APP="$DIST/markdown-lib.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-cp "$BIN" "$APP/Contents/MacOS/markdown-editor"
+cp "$BIN" "$APP/Contents/MacOS/markdown-lib"
 
 # Copy the SwiftPM-generated resource bundle next to the binary so Bundle.module resolves at runtime.
-BUNDLE_NAME="markdown-editor_markdown-editor.bundle"
+BUNDLE_NAME="markdown-lib_markdown-lib.bundle"
 BUNDLE_SRC="$(dirname "$BIN")/${BUNDLE_NAME}"
 if [ -d "$BUNDLE_SRC" ]; then
     cp -R "$BUNDLE_SRC" "$APP/Contents/MacOS/"
@@ -37,12 +37,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>markdown-editor</string>
-    <key>CFBundleDisplayName</key><string>Markdown Editor</string>
-    <key>CFBundleIdentifier</key><string>com.liuhe.markdown-editor</string>
+    <key>CFBundleName</key><string>markdown-lib</string>
+    <key>CFBundleDisplayName</key><string>Markdown Lib</string>
+    <key>CFBundleIdentifier</key><string>com.liuhe.markdown-lib</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-    <key>CFBundleExecutable</key><string>markdown-editor</string>
+    <key>CFBundleExecutable</key><string>markdown-lib</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>

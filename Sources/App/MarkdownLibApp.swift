@@ -3,7 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 @main
-struct MarkdownEditorApp: App {
+struct MarkdownLibApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {

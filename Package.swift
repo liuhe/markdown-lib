@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "markdown-editor",
+    name: "markdown-lib",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "markdown-editor",
+            name: "markdown-lib",
             path: "Sources/App",
             resources: [.copy("Resources")]
         ),
