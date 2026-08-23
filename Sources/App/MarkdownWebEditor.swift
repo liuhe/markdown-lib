@@ -538,6 +538,21 @@ struct MarkdownWebEditor: NSViewRepresentable {
             report();
           };
 
+          // Thin wrapper over Toast UI Editor's `exec(command, payload)`
+          // called by the native Format menu (⌘B / ⌘I / heading levels /
+          // list types / …). Payload is JSON-serialisable from Swift; we
+          // pass it through unchanged.
+          window.mdExec = function (command, payload) {
+            try {
+              if (payload && typeof payload === 'object') {
+                editor.exec(command, payload);
+              } else {
+                editor.exec(command);
+              }
+              editor.focus();
+            } catch (err) {}
+          };
+
           // Scroll the Nth heading (ATX h1..h6) in document order into view.
           // Matching by index (rather than by text) is stable when heading
           // text repeats.

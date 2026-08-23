@@ -6,6 +6,31 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-23
+
+### Added
+- **Format menu with keyboard shortcuts** for every toolbar command.
+  All items route through `EditorBridge.execCommand` →
+  `window.mdExec` → `editor.exec` in Toast UI. Everything works even
+  when the WKWebView has focus because AppKit menu shortcuts intercept
+  before the browser sees the key.
+
+  | Command | Shortcut |
+  |---|---|
+  | Bold | `⌘B` |
+  | Italic | `⌘I` |
+  | Strikethrough | `⌘⇧X` |
+  | Code (inline) | `⌘E` |
+  | Code Block | `⌘⇧E` |
+  | Heading 1–6 | `⌥⌘1` … `⌥⌘6` |
+  | Paragraph (clear heading) | `⌥⌘P` |
+  | Bullet List | `⌘⇧8` |
+  | Ordered List | `⌘⇧7` |
+  | Task List | `⌘⇧9` |
+  | Blockquote | `⌘⇧.` |
+  | Horizontal Rule | `⌘⇧-` |
+  | Table (3×3) | `⌥⌘T` |
+
 ## [0.10.1] - 2026-08-23
 
 ### Fixed

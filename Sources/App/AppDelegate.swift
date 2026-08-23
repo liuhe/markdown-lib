@@ -390,6 +390,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(insertLink)
         editItem.submenu = editMenu
 
+        // Format menu -----------------------------------------------------
+        let formatItem = NSMenuItem()
+        menubar.addItem(formatItem)
+        let formatMenu = NSMenu(title: "Format")
+
+        func fmt(_ title: String, _ action: Selector, _ key: String, _ mods: NSEvent.ModifierFlags = [.command], tag: Int = 0) -> NSMenuItem {
+            let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            i.keyEquivalentModifierMask = mods
+            i.tag = tag
+            return i
+        }
+
+        formatMenu.addItem(fmt("Bold",
+                               #selector(MarkdownWindowController.formatBold(_:)),
+                               "b"))
+        formatMenu.addItem(fmt("Italic",
+                               #selector(MarkdownWindowController.formatItalic(_:)),
+                               "i"))
+        formatMenu.addItem(fmt("Strikethrough",
+                               #selector(MarkdownWindowController.formatStrike(_:)),
+                               "x", [.command, .shift]))
+        formatMenu.addItem(.separator())
+        formatMenu.addItem(fmt("Code",
+                               #selector(MarkdownWindowController.formatCode(_:)),
+                               "e"))
+        formatMenu.addItem(fmt("Code Block",
+                               #selector(MarkdownWindowController.formatCodeBlock(_:)),
+                               "e", [.command, .shift]))
+        formatMenu.addItem(.separator())
+
+        // Headings — ⌥⌘1 through ⌥⌘6 like Xcode / Ulysses.
+        for level in 1...6 {
+            formatMenu.addItem(fmt("Heading \(level)",
+                                   #selector(MarkdownWindowController.formatHeading(_:)),
+                                   "\(level)",
+                                   [.command, .option],
+                                   tag: level))
+        }
+        formatMenu.addItem(fmt("Paragraph",
+                               #selector(MarkdownWindowController.formatParagraph(_:)),
+                               "p", [.command, .option]))
+        formatMenu.addItem(.separator())
+
+        formatMenu.addItem(fmt("Bullet List",
+                               #selector(MarkdownWindowController.formatBulletList(_:)),
+                               "8", [.command, .shift]))
+        formatMenu.addItem(fmt("Ordered List",
+                               #selector(MarkdownWindowController.formatOrderedList(_:)),
+                               "7", [.command, .shift]))
+        formatMenu.addItem(fmt("Task List",
+                               #selector(MarkdownWindowController.formatTaskList(_:)),
+                               "9", [.command, .shift]))
+        formatMenu.addItem(.separator())
+
+        formatMenu.addItem(fmt("Blockquote",
+                               #selector(MarkdownWindowController.formatBlockquote(_:)),
+                               ".", [.command, .shift]))
+        formatMenu.addItem(fmt("Horizontal Rule",
+                               #selector(MarkdownWindowController.formatHorizontalRule(_:)),
+                               "-", [.command, .shift]))
+        formatMenu.addItem(fmt("Table",
+                               #selector(MarkdownWindowController.formatTable(_:)),
+                               "t", [.command, .option]))
+
+        formatItem.submenu = formatMenu
+
         // View menu -------------------------------------------------------
         let viewItem = NSMenuItem()
         menubar.addItem(viewItem)

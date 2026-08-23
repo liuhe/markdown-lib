@@ -88,6 +88,24 @@ final class EditorBridge: ObservableObject {
         run("window.mdScrollToHeading && window.mdScrollToHeading(\(index));")
     }
 
+    // MARK: - Format commands
+    //
+    // Delegate to Toast UI Editor's `exec(command, payload)`. Payload keys
+    // are command-specific (e.g., `heading` takes `{ level: N }`).
+
+    func execCommand(_ command: String, payload: [String: Any]? = nil) {
+        guard isEditorReady else { return }
+        let payloadLiteral: String
+        if let payload,
+           let data = try? JSONSerialization.data(withJSONObject: payload),
+           let s = String(data: data, encoding: .utf8) {
+            payloadLiteral = s
+        } else {
+            payloadLiteral = "null"
+        }
+        run("window.mdExec && window.mdExec(\(jsString(command)), \(payloadLiteral));")
+    }
+
     // MARK: - Callbacks from JS
 
     func updateSearchResult(count: Int, index: Int) {

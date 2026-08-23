@@ -451,6 +451,38 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
         tabs.activeTab?.bridge.requestFileLinkPicker()
     }
 
+    // MARK: - Format menu actions
+    //
+    // All of these route the same way: grab the active tab's bridge and
+    // ask Toast UI Editor to exec the matching command. `sender.tag` is
+    // used for heading level; everything else is a plain command name.
+
+    private func exec(_ command: String, payload: [String: Any]? = nil) {
+        tabs.activeTab?.bridge.execCommand(command, payload: payload)
+    }
+
+    @objc func formatBold(_ sender: Any?)         { exec("bold") }
+    @objc func formatItalic(_ sender: Any?)       { exec("italic") }
+    @objc func formatStrike(_ sender: Any?)       { exec("strike") }
+    @objc func formatCode(_ sender: Any?)         { exec("code") }
+    @objc func formatCodeBlock(_ sender: Any?)    { exec("codeBlock") }
+    @objc func formatBulletList(_ sender: Any?)   { exec("bulletList") }
+    @objc func formatOrderedList(_ sender: Any?)  { exec("orderedList") }
+    @objc func formatTaskList(_ sender: Any?)     { exec("taskList") }
+    @objc func formatBlockquote(_ sender: Any?)   { exec("blockQuote") }
+    @objc func formatHorizontalRule(_ sender: Any?) { exec("hr") }
+    @objc func formatParagraph(_ sender: Any?)    { exec("heading", payload: ["level": 0]) }
+    @objc func formatTable(_ sender: Any?) {
+        exec("addTable", payload: ["rowCount": 3, "columnCount": 3])
+    }
+
+    /// Menu items for heading levels 1–6 share this selector; the level
+    /// comes from `NSMenuItem.tag`.
+    @objc func formatHeading(_ sender: Any?) {
+        guard let item = sender as? NSMenuItem, (1...6).contains(item.tag) else { return }
+        exec("heading", payload: ["level": item.tag])
+    }
+
     // MARK: - Go to File… (⌘P)
 
     /// Menu action / ⌘P — open the workspace file picker; on pick, open the
