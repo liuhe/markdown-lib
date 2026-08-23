@@ -64,6 +64,39 @@ enum MarkdownOutline {
         // Trailing `#`s in a closed ATX header (`## foo ##`).
         while text.hasSuffix("#") { text = String(text.dropLast()) }
         text = text.trimmingCharacters(in: .whitespaces)
+        text = unescapeInlineMarkdown(text)
         return text.isEmpty ? nil : (level, text)
+    }
+
+    /// CommonMark: a backslash before ASCII punctuation is literal. Toast UI
+    /// Editor uses this liberally when serializing (`1.` → `1\.`, `(` →
+    /// `\(`, etc.) so the outline shouldn't show the backslashes.
+    private static func unescapeInlineMarkdown(_ s: String) -> String {
+        guard s.contains("\\") else { return s }
+        var out = ""
+        out.reserveCapacity(s.count)
+        var iter = s.makeIterator()
+        while let ch = iter.next() {
+            if ch == "\\", let next = iter.next() {
+                if isEscapableASCIIPunctuation(next) {
+                    out.append(next)
+                } else {
+                    out.append(ch)
+                    out.append(next)
+                }
+            } else {
+                out.append(ch)
+            }
+        }
+        return out
+    }
+
+    /// Per CommonMark: any of  !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+    private static let escapableASCIIPunctuation: Set<Character> = Set(
+        "!\"#$%&'()*+,-./:;<=>?@[]^_`{|}~\\"
+    )
+
+    private static func isEscapableASCIIPunctuation(_ ch: Character) -> Bool {
+        escapableASCIIPunctuation.contains(ch)
     }
 }

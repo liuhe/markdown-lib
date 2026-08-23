@@ -6,6 +6,17 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-23
+
+### Fixed
+- **Outline showed backslash-escapes in heading text.** Toast UI
+  Editor serializes markdown-punctuation inside heading text with
+  literal backslashes (`1.` → `1\.`, `(Business)` → `\(Business\)`,
+  etc.) so headings displayed as `1\. 业务和功能 \(Business\)` in the
+  outline panel. Added CommonMark backslash-unescape: `\` followed by
+  ASCII punctuation renders as the punctuation alone; anything else
+  (e.g., `\n`, `\：`) is left literal.
+
 ## [0.10.0] - 2026-08-23
 
 ### Added
