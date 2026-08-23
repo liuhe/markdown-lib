@@ -70,7 +70,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
         .md-search-hit-current { background: rgba(255, 149, 0, 0.75); border-radius: 2px; }
         </style>
         </head>
-        <body>
+        <body spellcheck="false" autocorrect="off" autocapitalize="off" translate="no">
         <div id="editor"></div>
         <script>
         \(js)
@@ -93,7 +93,29 @@ struct MarkdownWebEditor: NSViewRepresentable {
             ]
           });
 
-          // 剥掉“整行只有 <br>”的行 —— Toast UI WYSIWYG 里空段落序列化成这个，
+          // Kill spellcheck / autocorrect / smart-substitution on every
+          // contenteditable ProseMirror creates. WKWebView's spellcheck
+          // path (applespell) hitches the input queue on longer docs —
+          // exactly the "type-type-type … pause" symptom users report.
+          function disableSpellCheckOn(el) {
+            if (!el || el.__mdlibSpellDisabled) return;
+            el.setAttribute('spellcheck', 'false');
+            el.setAttribute('autocorrect', 'off');
+            el.setAttribute('autocapitalize', 'off');
+            el.setAttribute('translate', 'no');
+            el.__mdlibSpellDisabled = true;
+          }
+          function disableSpellCheckEverywhere() {
+            var nodes = document.querySelectorAll('[contenteditable]');
+            for (var i = 0; i < nodes.length; i++) disableSpellCheckOn(nodes[i]);
+          }
+          // Initial sweep + observer for anything ProseMirror recreates later.
+          setTimeout(disableSpellCheckEverywhere, 0);
+          new MutationObserver(function () {
+            disableSpellCheckEverywhere();
+          }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['contenteditable', 'spellcheck'] });
+
+          // 剥掉"整行只有 <br>"的行 —— Toast UI WYSIWYG 里空段落序列化成这个，
           // 但反过来解析时不生成可放光标的块，会让退格跨过整段删掉上面的列表项
           function normalizeMarkdown(md) {
             if (typeof md !== 'string') return md;

@@ -6,6 +6,20 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-23
+
+### Fixed
+- **Editing hiccups from macOS spell check.** The WKWebView's built-in
+  spell-check path (`applespell`) periodically ran `checkTextInDocument`
+  as the user typed, hitching the input queue and producing the
+  intermittent "type-type-type … pause" symptom users reported (visible
+  as an `applespell` CPU spike in Activity Monitor). We now set
+  `spellcheck="false" autocorrect="off" autocapitalize="off" translate="no"`
+  on the editor body, and a MutationObserver re-asserts those attributes
+  on any contenteditable ProseMirror creates or resets. If you want
+  spell check back, remove those attributes in `MarkdownWebEditor.swift`
+  (an in-app toggle is a future addition).
+
 ## [0.6.1] - 2026-08-23
 
 ### Changed

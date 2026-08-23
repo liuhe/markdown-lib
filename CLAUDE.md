@@ -99,6 +99,16 @@ persist as bogus spans in the exported markdown.
    twice (temp file + rename), which used to trip the "modified elsewhere"
    dialog on our own saves.
 
+4b. **Spell check is off by design.** The editor HTML body carries
+   `spellcheck="false" autocorrect="off" autocapitalize="off" translate="no"`,
+   and a MutationObserver re-applies those attributes on any
+   contenteditable ProseMirror recreates. macOS `applespell` runs
+   `checkTextInDocument` synchronously on the input path — on longer
+   documents this shows up as intermittent typing pauses. If you ever
+   want spell check back, remove the attributes AND the observer, and
+   consider gating behind a per-document / per-app toggle so users can
+   opt in.
+
 5. **`<br>` normalization is outbound-only.** Toast UI Editor serializes
    empty paragraphs as a bare `<br>` on their own line. `normalizeMarkdown`
    strips those lines from the string we hand to Swift so the on-disk file
