@@ -20,6 +20,10 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
     /// Guard so a single external-mod change per tab only prompts once.
     private var externalPromptInFlight: Set<UUID> = []
 
+    /// Sheet we open for the workspace-file link picker; kept so we can end
+    /// it from the pick / cancel callbacks.
+    private weak var linkPickerSheet: NSWindow?
+
     // MARK: - Init
 
     init(appDelegate: AppDelegate, workspace: WorkspaceStore? = nil) {
@@ -106,6 +110,12 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
         tabCancellables.removeAll()
         for tab in tabs.tabs {
             let id = tab.id
+            // Route the JS-side "pick a file to link to" request through here
+            // so we can present the picker with the right workspace + tab.
+            tab.bridge.onFileLinkPickerRequested = { [weak self, weak tab] selection in
+                guard let self, let tab else { return }
+                self.presentFileLinkPicker(for: tab, defaultLabel: selection)
+            }
             tab.store.$text
                 .receive(on: RunLoop.main)
                 .sink { [weak self, weak tab] _ in
@@ -203,6 +213,10 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
                 case "w": self.closeWindowConfirming(); return nil
                 case "]": self.tabs.selectNext(); return nil
                 case "[": self.tabs.selectPrevious(); return nil
+                case "k":
+                    // Fallback if the WKWebView didn't consume ⌘⇧K itself
+                    // (focus in a native control, editor not ready, etc.).
+                    self.insertLinkToFile(nil); return nil
                 default: break
                 }
             }
@@ -404,6 +418,89 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
             }
         }
         return true
+    }
+
+    // MARK: - Insert Link to File…
+
+    /// Menu action (Edit → Insert Link to File…). Round-trips through JS so
+    /// the picker gets the current selection as the default label.
+    @objc func insertLinkToFile(_ sender: Any?) {
+        tabs.activeTab?.bridge.requestFileLinkPicker()
+    }
+
+    /// Called from the `pickFileLink` JS message. Opens the workspace file
+    /// picker as a sheet; on selection, computes a relative path from the
+    /// tab's file and inserts a markdown link at the cursor.
+    func presentFileLinkPicker(for tab: DocumentTab, defaultLabel: String?) {
+        guard let workspace, let window else { NSSound.beep(); return }
+        guard let source = tab.store.fileURL else {
+            // Untitled tab — no anchor to compute a relative path from.
+            let alert = NSAlert()
+            alert.messageText = "Save this file first."
+            alert.informativeText = "Relative-path links need a saved location so the path can be computed."
+            alert.runModal()
+            return
+        }
+
+        let files = Self.collectMarkdownFiles(in: workspace.root)
+        let picker = FileLinkPicker(
+            files: files,
+            workspaceRoot: workspace.rootURL,
+            onPick: { [weak self] target in self?.finishLinkPicker(pick: target, source: source, tab: tab, defaultLabel: defaultLabel) },
+            onCancel: { [weak self] in self?.dismissLinkPickerSheet() }
+        )
+        let hosting = NSHostingController(rootView: picker)
+        hosting.view.setFrameSize(NSSize(width: 560, height: 400))
+
+        let sheet = NSWindow(contentViewController: hosting)
+        sheet.styleMask = [.titled, .fullSizeContentView]
+        sheet.titleVisibility = .hidden
+        sheet.titlebarAppearsTransparent = true
+        linkPickerSheet = sheet
+        window.beginSheet(sheet, completionHandler: nil)
+    }
+
+    private func finishLinkPicker(pick target: URL, source: URL, tab: DocumentTab, defaultLabel: String?) {
+        dismissLinkPickerSheet()
+        let href = RelativePath.relative(from: source, to: target)
+        let label: String
+        if let l = defaultLabel, !l.isEmpty { label = l }
+        else { label = Self.linkLabel(for: target) }
+        tab.bridge.insertLink(href: href, text: label)
+    }
+
+    private func dismissLinkPickerSheet() {
+        guard let sheet = linkPickerSheet, let window else { return }
+        window.endSheet(sheet)
+        linkPickerSheet = nil
+    }
+
+    /// Walk the tree collecting every markdown file, in a deterministic order
+    /// (workspace-scan sort). Includes file-folder nodes — they *are*
+    /// markdown files, they just have children in the sidebar.
+    static func collectMarkdownFiles(in root: FileNode) -> [URL] {
+        var out: [URL] = []
+        func walk(_ node: FileNode) {
+            if !node.isDirectory, WorkspaceStore.isMarkdownFile(node.url) {
+                out.append(node.url)
+            }
+            for c in node.children ?? [] { walk(c) }
+        }
+        walk(root)
+        return out
+    }
+
+    /// Prefer the target's frontmatter `title`, else the basename (without
+    /// extension). Never throws — a read failure just falls back to basename.
+    static func linkLabel(for url: URL) -> String {
+        if let data = try? Data(contentsOf: url),
+           let source = String(data: data, encoding: .utf8) {
+            let (fm, _) = Frontmatter.split(source)
+            if let fm, let title = Frontmatter.title(in: fm), !title.isEmpty {
+                return title
+            }
+        }
+        return url.deletingPathExtension().lastPathComponent
     }
 
     // MARK: - Sidebar file ops

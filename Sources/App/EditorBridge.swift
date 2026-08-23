@@ -11,6 +11,11 @@ final class EditorBridge: ObservableObject {
     weak var webView: WKWebView?
     var isEditorReady: Bool = false
 
+    /// Set by the window controller; fired when the JS side asks for a
+    /// workspace-file picker (`⌘⇧K` or the Edit menu item). The payload is
+    /// the current selection text, or nil if there was none.
+    var onFileLinkPickerRequested: ((String?) -> Void)?
+
     @Published var searchVisible: Bool = false
     @Published var query: String = ""
     @Published var replacement: String = ""
@@ -56,6 +61,23 @@ final class EditorBridge: ObservableObject {
         guard isEditorReady, !query.isEmpty else { return }
         if matchCount == 0 { NSSound.beep(); return }
         run("window.mdReplaceAll && window.mdReplaceAll(\(jsString(replacement)));")
+    }
+
+    // MARK: - Menu-driven picker request
+    //
+    // Menu → controller → this method. We bounce through JS so the selection
+    // text (if any) comes from the editor and drives the label default.
+
+    func requestFileLinkPicker() {
+        guard isEditorReady else { return }
+        run("window.mdRequestFileLink && window.mdRequestFileLink();")
+    }
+
+    // MARK: - Insert link (called after the picker returns)
+
+    func insertLink(href: String, text: String) {
+        guard isEditorReady else { return }
+        run("window.mdInsertLink && window.mdInsertLink(\(jsString(href)), \(jsString(text)));")
     }
 
     // MARK: - Callbacks from JS

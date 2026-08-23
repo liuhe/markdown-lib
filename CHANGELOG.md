@@ -6,6 +6,28 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-23
+
+### Added
+- **Insert Link to File…** (`⌘⇧K`, also in the Edit menu). Opens a
+  searchable picker of every markdown file in the current workspace;
+  picking a file inserts `[label](relative/path.md)` at the cursor.
+- **Relative-path storage.** The path is computed from the current
+  file's directory to the target (percent-encoded per component). Works
+  for siblings, descendants, ancestors, and cross-tree.
+- **Label resolution.** If the user has text selected before the
+  shortcut, that becomes the label. Otherwise the target's frontmatter
+  `title` (if any) is used, falling back to the basename.
+- `RelativePath.relative(from:to:)` helper with 8 assertions covering
+  sibling / into-subdir / out-one / out-two / cross-tree / spaces /
+  unicode / same-dir.
+
+### Notes
+- Untitled tabs get a "save this file first" alert on `⌘⇧K` — the
+  relative path needs an anchor.
+- Loose (no-workspace) windows fall through (beep) — nothing to pick
+  from.
+
 ## [0.5.2] - 2026-08-23
 
 ### Fixed

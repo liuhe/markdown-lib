@@ -32,7 +32,9 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | `FileTreeView.swift` | Workspace sidebar: `List { OutlineGroup … }`. Single-click opens editable files. |
 | `TabBar.swift` | In-window tab strip with dirty dot + hover × + new-tab button. |
 | `FindBar.swift` | Find & Replace UI. Owns `@FocusState`; drives the *active tab's* `EditorBridge`. |
-| `EditorBridge.swift` | One-per-tab imperative surface + `@Published` state for `FindBar`. |
+| `EditorBridge.swift` | One-per-tab imperative surface + `@Published` state for `FindBar`. Also carries `onFileLinkPickerRequested` closure the window controller wires per tab. |
+| `RelativePath.swift` | Pure helper: `relative(from source: URL, to target: URL) -> String` with percent-encoded components. Used for the Insert Link to File… feature. |
+| `FileLinkPicker.swift` | Modal SwiftUI sheet listing workspace markdown files with a search field; drives `⌘⇧K` / Edit → Insert Link to File…. |
 | `MarkdownWebEditor.swift` | `NSViewRepresentable` around a WKWebView. Loads inlined Toast UI Editor HTML/JS/CSS. Coordinator handles the JS ↔ Swift bridge (`webkit.messageHandlers.editor`). Takes a `DocumentStore` (`@ObservedObject`), not a `Binding<String>`. |
 
 ## The web-view bridge
@@ -211,7 +213,19 @@ persist as bogus spans in the exported markdown.
     companion directory (creating it lazily), keeping the "any markdown
     node is a container" mental model consistent.
 
-22. **Sidebar rename auto-follows `title:` metadata.**
+22. **Insert Link to File… bounces JS ↔ Swift ↔ SwiftUI.**
+    `⌘⇧K` (either the JS keydown handler or the Edit menu → controller →
+    `bridge.requestFileLinkPicker()` → `window.mdRequestFileLink()`) posts
+    a `pickFileLink` message carrying the current selection. The
+    controller opens a `FileLinkPicker` sheet, computes the relative path
+    via `RelativePath.relative(from:to:)`, and sends `mdInsertLink(href,
+    text)` back. Label priority: user's selection → target's frontmatter
+    `title` → target's basename. Untitled tabs abort with an alert
+    because a relative path needs a saved anchor. The link mark attrs
+    are set with both `linkUrl` (Toast UI's convention) and `href`
+    (ProseMirror default) so future schema changes don't silently break.
+
+23. **Sidebar rename auto-follows `title:` metadata.**
     `syncTitleFollowingFilename` in `MarkdownWindowController` only
     rewrites `title` when the old value exactly matched the old basename
     or the old filename. Users who set an intentional title (e.g.

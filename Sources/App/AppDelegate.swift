@@ -292,6 +292,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               keyEquivalent: "g")
         prev.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(prev)
+        editMenu.addItem(.separator())
+        let insertLink = NSMenuItem(title: "Insert Link to File…",
+                                    action: #selector(MarkdownWindowController.insertLinkToFile(_:)),
+                                    keyEquivalent: "k")
+        insertLink.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(insertLink)
         editItem.submenu = editMenu
 
         NSApp.mainMenu = menubar

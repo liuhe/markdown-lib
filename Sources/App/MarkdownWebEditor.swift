@@ -300,6 +300,72 @@ struct MarkdownWebEditor: NSViewRepresentable {
             }, 60);
           }, true);
 
+          // Cmd+Shift+K: ask the Swift side to open a workspace file picker.
+          // We ship the current selection along as the default link label.
+          document.addEventListener('keydown', function (e) {
+            if (!(e.metaKey && e.shiftKey && (e.key === 'k' || e.key === 'K'))) return;
+            e.preventDefault();
+            e.stopPropagation();
+            requestFileLink();
+          }, true);
+
+          function requestFileLink() {
+            var sel = window.getSelection();
+            var text = '';
+            try {
+              if (sel && !sel.isCollapsed && wwRoot() && wwRoot().contains(sel.anchorNode)) {
+                text = sel.toString();
+              }
+            } catch (err) {}
+            window.webkit.messageHandlers.editor.postMessage({
+              type: 'pickFileLink',
+              selection: text
+            });
+          }
+          // Exposed for the native menu path (Edit → Insert Link to File…).
+          window.mdRequestFileLink = requestFileLink;
+
+          // Programmatic link insertion invoked by Swift once the user has
+          // picked a target file. `text` is the label to render; `href` is
+          // the relative path. If there's a selection, replace it with the
+          // labelled link; otherwise insert at the cursor.
+          window.mdInsertLink = function (href, text) {
+            var wwEditor = editor.getCurrentModeEditor();
+            var view = wwEditor && wwEditor.view;
+            if (!view || !href) return;
+            var state = view.state;
+            var linkMark = state.schema.marks.link;
+            if (!linkMark) return;
+
+            var from = state.selection.from;
+            var to = state.selection.to;
+            var label = (text && text.length) ? text : href;
+
+            // Toast UI's link mark stores href on `linkUrl` (its extension of
+            // ProseMirror's default), and titles on `title`. Set both defensively.
+            var attrs = { linkUrl: href, href: href, title: null };
+            var mark = linkMark.create(attrs);
+
+            var tr;
+            if (from === to) {
+              // Nothing selected: insert `label` and mark it.
+              tr = state.tr.insertText(label, from);
+              tr = tr.addMark(from, from + label.length, mark);
+            } else {
+              // Something selected. If the caller supplied text that differs
+              // from the selection, replace it; otherwise just mark the range.
+              var selected = state.doc.textBetween(from, to);
+              if (text && text.length && text !== selected) {
+                tr = state.tr.insertText(text, from, to);
+                tr = tr.addMark(from, from + text.length, mark);
+              } else {
+                tr = state.tr.addMark(from, to, mark);
+              }
+            }
+            view.dispatch(tr);
+            try { editor.focus(); } catch (err) {}
+          };
+
           // 输入规则：`*`/`-`/`+` + 空格 → 无序列表
           // 直接操作 prosemirror view 的 state.tr.delete，用 $from.start(depth) 定位到当前
           // block 内容起点，跨节点边界之类的位置歧义就没了
@@ -605,6 +671,12 @@ struct MarkdownWebEditor: NSViewRepresentable {
                 let index = (dict["index"] as? Int) ?? 0
                 let bridge = parent.bridge
                 DispatchQueue.main.async { bridge.updateSearchResult(count: count, index: index) }
+            case "pickFileLink":
+                let selection = dict["selection"] as? String
+                let bridge = parent.bridge
+                DispatchQueue.main.async {
+                    bridge.onFileLinkPickerRequested?(selection?.isEmpty == true ? nil : selection)
+                }
             default: break
             }
         }
