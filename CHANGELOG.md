@@ -6,6 +6,23 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-23
+
+### Changed
+- **Workspace windows stay open after the last tab closes.** The sidebar
+  remains visible so the user can pick another file; only loose windows
+  (no folder) still close on the last tab (Sublime convention). Title
+  bar collapses to just the workspace name when no tab is active. Empty
+  editor pane shows a subtle "pick a file / press ⌘N" hint.
+
+### Added
+- **File → Open Recent** submenu, populated lazily. Two sections:
+  Folders (max 15) then Files (max 20), each shown with the system's
+  icon for that URL. Clicking an entry routes through the normal open
+  path; entries whose target no longer exists are pruned silently on
+  click. **Clear Menu** at the bottom wipes both lists. Persisted in
+  `UserDefaults` under `RecentFiles` / `RecentFolders`.
+
 ## [0.6.0] - 2026-08-23
 
 ### Added

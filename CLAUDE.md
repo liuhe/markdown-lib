@@ -21,7 +21,8 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | File | Responsibility |
 |---|---|
 | `main.swift` | Top-level `NSApp.run()`. No `@main`. |
-| `AppDelegate.swift` | Menu bar; open panel + folder panel; URL routing (files → tab, folders → workspace window); deminiaturize on Dock click; quit-with-dirty iterates every dirty tab in every window; buffers pre-launch file opens. |
+| `AppDelegate.swift` | Menu bar; open panel + folder panel; URL routing (files → tab, folders → workspace window); Open Recent submenu (via `NSMenuDelegate.menuNeedsUpdate`); deminiaturize on Dock click; quit-with-dirty iterates every dirty tab in every window; buffers pre-launch file opens. |
+| `RecentsStore.swift` | Two `UserDefaults`-backed lists (Recent Files, Recent Folders), deduped + capped (20 / 15). Written by `AppDelegate.openFile / openWorkspaceWindow`, read by the Open Recent menu delegate. |
 | `DocumentStore.swift` | `ObservableObject` per document: `text` (body only), `rawFrontmatter`, `fileURL`, `lastSavedText`, `externallyModified`, disk I/O, 2 s polling timer, 0.5 s self-write debounce. `title` computed from `rawFrontmatter`; `displayName` prefers `title` over filename. |
 | `Frontmatter.swift` | Pure-Swift YAML-frontmatter helper. `split(_:) → (frontmatter, body)`, `assemble(frontmatter:body:) → String`, `title(in:) → String?`. Frontmatter is stored raw so unknown keys round-trip untouched. |
 | `WorkspaceStore.swift` | Per-window folder root + recursively scanned `FileNode` tree; owns a `FileTreeWatcher` for auto-refresh; exposes `createFile / createFolder / rename / trash` used by the sidebar context menu. |
@@ -139,10 +140,12 @@ persist as bogus spans in the exported markdown.
     strip. macOS native window tabs (`⌘\``, Merge All Windows, etc.)
     would fight the sidebar layout and duplicate our state; keep them off.
 
-12. **⌘W closes tab, not window.** Sublime convention. The controller
-    calls `window.performClose(nil)` itself when the last tab is removed;
-    `windowShouldClose` then iterates any remaining dirty tabs for
-    confirmation before actually closing.
+12. **⌘W closes tab, not window.** Sublime convention. In loose windows
+    the controller calls `window.performClose(nil)` itself when the last
+    tab is removed; **workspace windows keep going** — the sidebar stays
+    visible so the user can pick another file. Closing a workspace
+    window itself is an explicit ⌘⇧W. `windowShouldClose` still iterates
+    any remaining dirty tabs for confirmation before actually closing.
 
 13. **Sidebar file ops trigger *both* an eager refresh and an FSEvents
     refresh.** `WorkspaceStore.createFile` etc. call `refresh()` in the

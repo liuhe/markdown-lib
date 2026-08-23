@@ -56,6 +56,16 @@ struct MarkdownWindowView: View {
                     }
                     if tabs.tabs.isEmpty {
                         Color(nsColor: .textBackgroundColor)
+                        VStack(spacing: 10) {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 40, weight: .light))
+                                .foregroundStyle(.tertiary)
+                            Text(workspace != nil
+                                 ? "Pick a file in the sidebar, or press ⌘N for a new tab."
+                                 : "Press ⌘N for a new tab or ⌘O to open a file.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

@@ -1,9 +1,12 @@
 import AppKit
 import UniformTypeIdentifiers
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private(set) var controllers: [MarkdownWindowController] = []
+
+    private let recents = RecentsStore.shared
+    private var openRecentMenu: NSMenu?
 
     /// Files handed to `application(_:openFiles:)` before we've finished
     /// launching.
@@ -88,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func openFile(at url: URL) {
+        recents.addFile(url)
         // 1. If any window already has this file open, focus that tab.
         for c in controllers {
             if let idx = c.tabs.tabs.firstIndex(where: { $0.store.fileURL == url }) {
@@ -127,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @discardableResult
     func openWorkspaceWindow(rootURL: URL, initialFile: URL? = nil) -> MarkdownWindowController {
+        recents.addFolder(rootURL)
         if let existing = controllers.first(where: { $0.workspace?.rootURL == rootURL }) {
             if let initial = initialFile { existing.openInNewTab(initial) }
             existing.showWindow(nil)
@@ -249,6 +254,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         keyEquivalent: "o")
         openFolderItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(openFolderItem)
+
+        let openRecent = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        let recentMenu = NSMenu(title: "Open Recent")
+        recentMenu.delegate = self
+        recentMenu.autoenablesItems = false
+        openRecent.submenu = recentMenu
+        openRecentMenu = recentMenu
+        fileMenu.addItem(openRecent)
+
         fileMenu.addItem(.separator())
         fileMenu.addItem(NSMenuItem(title: "Close Tab",
                                     action: #selector(NSWindow.performClose(_:)),
@@ -301,6 +315,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editItem.submenu = editMenu
 
         NSApp.mainMenu = menubar
+    }
+
+    // MARK: - Open Recent
+
+    /// Populate the submenu lazily each time it opens so removals from
+    /// missing-file pruning + new opens are reflected without wiring
+    /// change-listeners.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === openRecentMenu else { return }
+        menu.removeAllItems()
+
+        let folders = recents.folders
+        let files = recents.files
+        var addedAnything = false
+
+        if !folders.isEmpty {
+            menu.addItem(sectionHeader("Folders"))
+            for url in folders { menu.addItem(recentItem(for: url, isFolder: true)) }
+            addedAnything = true
+        }
+        if !files.isEmpty {
+            if addedAnything { menu.addItem(.separator()) }
+            menu.addItem(sectionHeader("Files"))
+            for url in files { menu.addItem(recentItem(for: url, isFolder: false)) }
+            addedAnything = true
+        }
+        if !addedAnything {
+            let empty = NSMenuItem(title: "No Recent Items", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+        } else {
+            menu.addItem(.separator())
+            menu.addItem(NSMenuItem(title: "Clear Menu",
+                                    action: #selector(clearRecents(_:)),
+                                    keyEquivalent: ""))
+        }
+    }
+
+    private func sectionHeader(_ title: String) -> NSMenuItem {
+        if #available(macOS 14, *) {
+            return NSMenuItem.sectionHeader(title: title)
+        }
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    private func recentItem(for url: URL, isFolder: Bool) -> NSMenuItem {
+        let item = NSMenuItem(title: url.lastPathComponent,
+                              action: #selector(openRecent(_:)),
+                              keyEquivalent: "")
+        item.target = self
+        item.representedObject = url
+        item.toolTip = url.path
+        let ws = NSWorkspace.shared
+        let icon = ws.icon(forFile: url.path)
+        icon.size = NSSize(width: 16, height: 16)
+        item.image = icon
+        _ = isFolder    // we currently just show the system icon; kept for future differentiation
+        return item
+    }
+
+    @objc private func openRecent(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        // Prune stale entries silently — a moved / deleted item on the recents
+        // list shouldn't beep at the user forever.
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            recents.remove(url)
+            NSSound.beep()
+            return
+        }
+        open(url: url)
+    }
+
+    @objc private func clearRecents(_ sender: Any?) {
+        recents.clearAll()
     }
 
     // MARK: - Errors

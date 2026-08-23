@@ -156,17 +156,20 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
 
     private func refreshTitle() {
         guard let window else { return }
-        let base: String
         if let active = tabs.activeTab {
             let name = active.store.displayName
-            base = active.store.isDirty ? "\(name) — Edited" : name
+            let mark = active.store.isDirty ? " — Edited" : ""
+            if let ws = workspace {
+                window.title = "\(name)\(mark) — \(ws.rootURL.lastPathComponent)"
+            } else {
+                window.title = "\(name)\(mark)"
+            }
+        } else if let ws = workspace {
+            // No open tabs, but the sidebar is still there — show just the
+            // workspace name.
+            window.title = ws.rootURL.lastPathComponent
         } else {
-            base = "markdown-lib"
-        }
-        if let ws = workspace {
-            window.title = "\(base) — \(ws.rootURL.lastPathComponent)"
-        } else {
-            window.title = base
+            window.title = "markdown-lib"
         }
         window.isDocumentEdited = tabs.activeTab?.store.isDirty ?? false
     }
@@ -259,8 +262,19 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
             }
         }
         let becameEmpty = tabs.remove(at: index)
-        if becameEmpty { window?.performClose(nil) }
-        else { refreshTitleAndDocProxy() }
+        if becameEmpty {
+            // Loose window: closing the last tab closes the window (Sublime
+            // convention). Workspace window: keep the sidebar visible so the
+            // user can pick another file — closing the workspace itself is
+            // an explicit ⌘⇧W away.
+            if workspace == nil {
+                window?.performClose(nil)
+            } else {
+                refreshTitleAndDocProxy()
+            }
+        } else {
+            refreshTitleAndDocProxy()
+        }
     }
 
     private func closeWindowConfirming() { window?.performClose(nil) }
