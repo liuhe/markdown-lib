@@ -1,10 +1,23 @@
 #!/bin/bash
 # Build, package, codesign (ad-hoc) and install the markdown-lib.app bundle.
 # Usage: bash scripts/make-app-bundle.sh [version]
+#   If [version] is omitted, reads $ROOT/VERSION.
 set -euo pipefail
 
-VERSION="${1:-0.0.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ $# -ge 1 ]; then
+    VERSION="$1"
+elif [ -f "$ROOT/VERSION" ]; then
+    VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+else
+    VERSION="0.0.0"
+fi
+if [ -z "$VERSION" ]; then
+    echo "VERSION is empty" >&2
+    exit 1
+fi
+echo "==> version: $VERSION"
 
 echo "==> swift build -c release"
 (cd "$ROOT" && swift build -c release)
