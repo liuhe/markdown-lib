@@ -18,6 +18,13 @@ final class DocumentStore: ObservableObject {
     /// external edits without re-reading the whole file.
     private var lastKnownModDate: Date?
 
+    /// Wall-clock time of our most recent write. Guards against atomic-write
+    /// filesystems where the mtime we read back after saving is slightly newer
+    /// than the one we tracked, or where a rename bumps mtime twice — those
+    /// look like an external edit on the next poll.
+    private var lastSelfWriteTime: Date?
+    private let selfWriteThreshold: TimeInterval = 0.5
+
     private var pollTimer: Timer?
 
     var isDirty: Bool { text != lastSavedText }
@@ -54,6 +61,7 @@ final class DocumentStore: ObservableObject {
         lastSavedText = text
         fileURL = url
         lastKnownModDate = modificationDate(of: url)
+        lastSelfWriteTime = Date()
         externallyModified = false
         startPolling()
     }
@@ -87,10 +95,15 @@ final class DocumentStore: ObservableObject {
             if !externallyModified { externallyModified = true }
             return
         }
-        if current > previous {
+        guard current > previous else { return }
+        // Debounce: ignore mtime bumps that happen within 0.5s of our own save.
+        if let selfWrite = lastSelfWriteTime,
+           Date().timeIntervalSince(selfWrite) < selfWriteThreshold {
             lastKnownModDate = current
-            externallyModified = true
+            return
         }
+        lastKnownModDate = current
+        externallyModified = true
     }
 
     /// Acknowledge the external change without reloading — clears the flag.

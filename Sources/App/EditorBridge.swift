@@ -1,5 +1,6 @@
 import Foundation
 import WebKit
+import AppKit
 
 /// Shared between the window controller, the FindBar (SwiftUI), and the
 /// `MarkdownWebEditor` coordinator. Owns the WKWebView reference and exposes
@@ -35,21 +36,25 @@ final class EditorBridge: ObservableObject {
 
     func findNext() {
         guard isEditorReady, !query.isEmpty else { return }
+        if matchCount == 0 { NSSound.beep(); return }
         run("window.mdFindStep && window.mdFindStep(1);")
     }
 
     func findPrev() {
         guard isEditorReady, !query.isEmpty else { return }
+        if matchCount == 0 { NSSound.beep(); return }
         run("window.mdFindStep && window.mdFindStep(-1);")
     }
 
     func replaceCurrent() {
         guard isEditorReady, !query.isEmpty else { return }
+        if matchCount == 0 { NSSound.beep(); return }
         run("window.mdReplace && window.mdReplace(\(jsString(replacement)));")
     }
 
     func replaceAll() {
         guard isEditorReady, !query.isEmpty else { return }
+        if matchCount == 0 { NSSound.beep(); return }
         run("window.mdReplaceAll && window.mdReplaceAll(\(jsString(replacement)));")
     }
 

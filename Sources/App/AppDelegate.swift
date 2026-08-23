@@ -5,15 +5,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var controllers: [DocumentWindowController] = []
 
+    /// Files handed to `application(_:openFiles:)` before we've finished
+    /// launching. macOS delivers double-click opens right after
+    /// willFinishLaunching, but SwiftUI/NSHostingView is happier if we defer
+    /// window creation until didFinishLaunching.
+    private var pendingFiles: [URL] = []
+    private var didFinishLaunching = false
+
     // MARK: - Lifecycle
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
         buildMainMenu()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        didFinishLaunching = true
+        let queued = pendingFiles
+        pendingFiles.removeAll()
+        for url in queued { openFile(at: url) }
         if controllers.isEmpty {
             _ = openUntitledWindow()
         }
@@ -27,10 +38,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
-        for path in filenames {
-            openFile(at: URL(fileURLWithPath: path))
+        let urls = filenames.map { URL(fileURLWithPath: $0) }
+        if didFinishLaunching {
+            for url in urls { openFile(at: url) }
+        } else {
+            pendingFiles.append(contentsOf: urls)
         }
         sender.reply(toOpenOrPrint: .success)
+    }
+
+    /// Dock-click / open-again: deminiaturize a hidden window instead of
+    /// silently failing when every window is in the Dock.
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows flag: Bool) -> Bool {
+        if flag { return true }
+        if let miniaturized = controllers.first(where: { $0.window?.isMiniaturized == true }) {
+            miniaturized.window?.deminiaturize(nil)
+            return false
+        }
+        if controllers.isEmpty {
+            _ = openUntitledWindow()
+        } else {
+            controllers.last?.showWindow(nil)
+        }
+        return false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

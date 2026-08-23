@@ -158,10 +158,11 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate {
         if let md = UTType(filenameExtension: "md") {
             panel.allowedContentTypes = [md]
         }
+        // Attach as a sheet when we have a window; drain events manually so we
+        // can keep the sync save-flow contract (Save/Quit path returns Bool).
         let response: NSApplication.ModalResponse
         if let window {
-            response = panel.runModal() // sheet-based modal from menus can hang if the WKWebView is first responder; keep it app-modal
-            _ = window // silence unused warning
+            response = Self.runAsSheet(panel, on: window)
         } else {
             response = panel.runModal()
         }
@@ -174,6 +175,27 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate {
             appDelegate?.presentError(error)
             return false
         }
+    }
+
+    /// Present `panel` as a sheet on `window` while blocking synchronously by
+    /// pumping the run loop until the completion handler fires.
+    private static func runAsSheet(_ panel: NSSavePanel,
+                                   on window: NSWindow) -> NSApplication.ModalResponse {
+        var response: NSApplication.ModalResponse = .cancel
+        var done = false
+        panel.beginSheetModal(for: window) { r in
+            response = r
+            done = true
+        }
+        while !done {
+            if let event = NSApp.nextEvent(matching: .any,
+                                           until: .distantFuture,
+                                           inMode: .default,
+                                           dequeue: true) {
+                NSApp.sendEvent(event)
+            }
+        }
+        return response
     }
 
     // MARK: - Close flow
