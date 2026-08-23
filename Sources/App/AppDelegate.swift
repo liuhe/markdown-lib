@@ -259,6 +259,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc func toggleOutline(_ sender: Any?) {
+        // The window views observe this key through @AppStorage and
+        // re-render themselves; no need to touch controllers directly.
+        let key = "OutlineVisible"
+        let current = UserDefaults.standard.bool(forKey: key)
+        UserDefaults.standard.set(!current, forKey: key)
+        // Keep the menu item's checkmark in sync immediately.
+        if let item = NSApp.mainMenu?.items
+            .compactMap({ $0.submenu })
+            .flatMap({ $0.items })
+            .first(where: { $0.action == #selector(toggleOutline(_:)) }) {
+            item.state = !current ? .on : .off
+        }
+    }
+
     // MARK: - Menu construction
 
     private func buildMainMenu() {
@@ -374,6 +389,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         insertLink.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(insertLink)
         editItem.submenu = editMenu
+
+        // View menu -------------------------------------------------------
+        let viewItem = NSMenuItem()
+        menubar.addItem(viewItem)
+        let viewMenu = NSMenu(title: "View")
+        let outlineItem = NSMenuItem(title: "Show Outline",
+                                     action: #selector(toggleOutline(_:)),
+                                     keyEquivalent: "0")
+        outlineItem.keyEquivalentModifierMask = [.command, .option]
+        outlineItem.target = self
+        outlineItem.state = UserDefaults.standard.bool(forKey: "OutlineVisible") ? .on : .off
+        viewMenu.addItem(outlineItem)
+        viewItem.submenu = viewMenu
 
         NSApp.mainMenu = menubar
     }

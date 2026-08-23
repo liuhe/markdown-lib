@@ -538,6 +538,17 @@ struct MarkdownWebEditor: NSViewRepresentable {
             report();
           };
 
+          // Scroll the Nth heading (ATX h1..h6) in document order into view.
+          // Matching by index (rather than by text) is stable when heading
+          // text repeats.
+          window.mdScrollToHeading = function (index) {
+            var root = wwRoot();
+            if (!root) return;
+            var headings = root.querySelectorAll('h1, h2, h3, h4, h5, h6');
+            if (index < 0 || index >= headings.length) return;
+            headings[index].scrollIntoView({ behavior: 'smooth', block: 'start' });
+          };
+
           window.mdFindStep = function (delta) {
             if (!searchState.hits.length) { report(); return; }
             var n = searchState.hits.length;

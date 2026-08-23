@@ -209,6 +209,13 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
                         self.tabs.selectAbsolute(n); return nil
                     }
                 }
+            } else if cmd && opt && !shift {
+                switch key {
+                case "0":
+                    self.appDelegate?.toggleOutline(nil)
+                    return nil
+                default: break
+                }
             } else if cmd && shift && !opt {
                 switch key {
                 case "s": self.saveActiveTabAs(); return nil

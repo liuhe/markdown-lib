@@ -6,6 +6,25 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-23
+
+### Added
+- **Right-side outline sidebar** with the active document's ATX
+  headings, indented per level. Click a heading to scroll it into view
+  in the editor. Empty state shows "No headings" so an untitled tab
+  isn't blank noise.
+- **View menu → Show Outline (`⌥⌘0`)** toggles it. Also on the
+  window-scoped key monitor so it fires with the WKWebView focused.
+  State is persisted via `@AppStorage("OutlineVisible")` so both
+  windows (and next launch) reflect the same preference.
+- `MarkdownOutline` — line-based ATX heading extractor. Skips fenced
+  code blocks (```` ``` ```` and ` ~~~ `), skips 4-space-indented lines
+  (CommonMark code-block rule), and strips closed `##` trailing
+  hashes. Setext (underlined) headings aren't parsed yet.
+- `EditorBridge.scrollToHeading(index:)` + JS
+  `window.mdScrollToHeading(n)` — matches by heading index in document
+  order so duplicate heading text doesn't confuse the jump.
+
 ## [0.9.0] - 2026-08-23
 
 ### Added

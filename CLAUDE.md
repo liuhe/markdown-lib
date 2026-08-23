@@ -36,6 +36,8 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | `EditorBridge.swift` | One-per-tab imperative surface + `@Published` state for `FindBar`. Also carries `onFileLinkPickerRequested` closure the window controller wires per tab. |
 | `RelativePath.swift` | Pure helper: `relative(from source: URL, to target: URL) -> String` with percent-encoded components. Used for the Insert Link to File… feature. |
 | `FileLinkPicker.swift` | `WorkspaceFilePicker` — modal SwiftUI sheet listing workspace markdown files with a search field + fuzzy scoring; drives both `⌘P` Go to File… and `⇧⌘K` Insert Link to File…. |
+| `MarkdownOutline.swift` | Line-based ATX heading parser (skips fenced code blocks + 4-space-indented lines). Feeds the right-side outline sidebar. |
+| `OutlineView.swift` | Right-side outline sidebar (per active tab). Toggled via View → Show Outline (`⌥⌘0`), persisted with `@AppStorage("OutlineVisible")`. Click a heading → `EditorBridge.scrollToHeading(index:)` → JS `mdScrollToHeading(n)` which scrolls the Nth `<h1>…<h6>` element into view. |
 | `MarkdownWebEditor.swift` | `NSViewRepresentable` around a WKWebView. Loads inlined Toast UI Editor HTML/JS/CSS. Coordinator handles the JS ↔ Swift bridge (`webkit.messageHandlers.editor`). Takes a `DocumentStore` (`@ObservedObject`), not a `Binding<String>`. |
 
 ## The web-view bridge

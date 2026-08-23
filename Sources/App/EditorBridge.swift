@@ -80,6 +80,14 @@ final class EditorBridge: ObservableObject {
         run("window.mdInsertLink && window.mdInsertLink(\(jsString(href)), \(jsString(text)));")
     }
 
+    // MARK: - Outline navigation
+
+    /// Scroll the Nth heading (`<h1>`…`<h6>` in document order) into view.
+    func scrollToHeading(index: Int) {
+        guard isEditorReady else { return }
+        run("window.mdScrollToHeading && window.mdScrollToHeading(\(index));")
+    }
+
     // MARK: - Callbacks from JS
 
     func updateSearchResult(count: Int, index: Int) {

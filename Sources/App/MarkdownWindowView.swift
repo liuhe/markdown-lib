@@ -21,6 +21,10 @@ struct MarkdownWindowView: View {
     let onMove: (URL) -> Void
     let onDropMove: (URL, URL) -> Void
 
+    /// Persisted across launches so users don't have to re-toggle.
+    /// View → Show Outline (⌥⌘0) flips it via `AppDelegate.toggleOutline`.
+    @AppStorage("OutlineVisible") private var outlineVisible: Bool = false
+
     var body: some View {
         HStack(spacing: 0) {
             if let ws = workspace {
@@ -68,6 +72,13 @@ struct MarkdownWindowView: View {
                         }
                     }
                 }
+            }
+
+            if outlineVisible, let active = tabs.activeTab {
+                Divider()
+                OutlineView(store: active.store,
+                            onSelect: { active.bridge.scrollToHeading(index: $0) })
+                    .id(active.id)
             }
         }
         .frame(minWidth: workspace == nil ? 600 : 800, minHeight: 420)
