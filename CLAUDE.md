@@ -21,13 +21,17 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | File | Responsibility |
 |---|---|
 | `main.swift` | Top-level `NSApp.run()`. No `@main`. |
-| `AppDelegate.swift` | Menu bar; open panel; open-URL routing; deminiaturize on Dock click; quit-with-dirty prompt; buffers pre-launch file opens. |
+| `AppDelegate.swift` | Menu bar; open panel + folder panel; URL routing (files → tab, folders → workspace window); deminiaturize on Dock click; quit-with-dirty iterates every dirty tab in every window; buffers pre-launch file opens. |
 | `DocumentStore.swift` | `ObservableObject` per document: `text`, `fileURL`, `lastSavedText`, `externallyModified`, disk I/O, 2 s polling timer, 0.5 s self-write debounce. |
-| `DocumentWindowController.swift` | `NSWindowController` per window: hosts `EditorView`, wires save / close / reload dialogs, installs the local `NSEvent` monitor, refreshes title + `representedURL` + `isDocumentEdited`. |
-| `EditorBridge.swift` | Shared handle between the window controller, `FindBar` (SwiftUI), and the WKWebView coordinator. Exposes the imperative search / replace surface + `@Published` state. |
-| `EditorView.swift` | SwiftUI shell stacking `FindBar` over `MarkdownWebEditor`. |
-| `FindBar.swift` | Find & Replace UI. Owns `@FocusState` and the debounce for live search. |
-| `MarkdownWebEditor.swift` | `NSViewRepresentable` around a WKWebView. Loads inlined Toast UI Editor HTML/JS/CSS. Coordinator handles the JS ↔ Swift bridge (`webkit.messageHandlers.editor`). |
+| `WorkspaceStore.swift` | Per-window folder root + recursively scanned `FileNode` tree; `refresh()` re-scans on demand. |
+| `TabbedDocumentModel.swift` | `[DocumentTab]` + `activeIndex`. `DocumentTab` bundles one `DocumentStore` with its own `EditorBridge` so search state is per-tab. |
+| `MarkdownWindowController.swift` | One `NSWindowController` per window. Owns a `TabbedDocumentModel` and an optional `WorkspaceStore`. Wires save / close / reload dialogs (all scoped to the active tab; close-window iterates every dirty tab). Local `NSEvent` monitor handles ⌘N/O/S/⇧S/W/T/F/G/⇧G/⇧O/⇧N, ⌃Tab, ⌘1…⌘9, ⌘⇧[ / ⌘⇧]. |
+| `MarkdownWindowView.swift` | SwiftUI shell: `[optional FileTreeView | (TabBar / FindBar / editor ZStack)]`. All tabs stay in the hierarchy behind a ZStack + opacity so their WKWebView keeps cursor/scroll/undo history across switches. |
+| `FileTreeView.swift` | Workspace sidebar: `List { OutlineGroup … }`. Single-click opens editable files. |
+| `TabBar.swift` | In-window tab strip with dirty dot + hover × + new-tab button. |
+| `FindBar.swift` | Find & Replace UI. Owns `@FocusState`; drives the *active tab's* `EditorBridge`. |
+| `EditorBridge.swift` | One-per-tab imperative surface + `@Published` state for `FindBar`. |
+| `MarkdownWebEditor.swift` | `NSViewRepresentable` around a WKWebView. Loads inlined Toast UI Editor HTML/JS/CSS. Coordinator handles the JS ↔ Swift bridge (`webkit.messageHandlers.editor`). Takes a `DocumentStore` (`@ObservedObject`), not a `Binding<String>`. |
 
 ## The web-view bridge
 
@@ -110,6 +114,27 @@ persist as bogus spans in the exported markdown.
    `AppDelegate.controllers`. `controllerDidClose(_:)` is the only reference
    drop — do not add manual `close()` paths that bypass it or the array
    leaks.
+
+9. **Tabs stay alive via ZStack + opacity.** `MarkdownWindowView` renders
+   every open tab's `MarkdownWebEditor` inside a `ZStack`, toggling
+   `.opacity` + `.allowsHitTesting` on the inactive ones. This is what
+   keeps each tab's WKWebView cursor / scroll / undo history intact across
+   tab switches. Switching to a lazy "only-render-active" model will
+   destroy per-tab state — don't.
+
+10. **`EditorBridge` is per-tab, not per-window.** Each `DocumentTab`
+    carries its own bridge, so search query / match count / current index
+    stay per-tab. The `FindBar` in `MarkdownWindowView` is `.id`-keyed on
+    the active tab so it rebuilds when you switch tabs.
+
+11. **`window.tabbingMode = .disallowed`.** We ship our own in-window tab
+    strip. macOS native window tabs (`⌘\``, Merge All Windows, etc.)
+    would fight the sidebar layout and duplicate our state; keep them off.
+
+12. **⌘W closes tab, not window.** Sublime convention. The controller
+    calls `window.performClose(nil)` itself when the last tab is removed;
+    `windowShouldClose` then iterates any remaining dirty tabs for
+    confirmation before actually closing.
 
 ## Versioning + releases
 

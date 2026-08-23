@@ -9,8 +9,11 @@ A native macOS WYSIWYG Markdown editor. Raw AppKit shell + WKWebView hosting
 
 - **WYSIWYG editing** — markdown source stays on disk; the editor surface is a
   rich contenteditable via Toast UI Editor.
-- **Multi-window** — one document per window; app stays alive after the last
-  window closes; clean untitled windows are reused when opening files.
+- **Workspace mode** — `File → Open Folder…` (`⇧⌘O`) opens a folder as a
+  workspace with a sidebar file tree; clicking a file opens it as a tab.
+- **Tabs + multi-window** — every window has an in-window tab strip. `⌘N`
+  new tab · `⇧⌘N` new window · `⌘W` close tab · `⌃Tab` cycle · `⌘1`…`⌘9`
+  jump. Tab WKWebView state (cursor, scroll, undo) persists across switches.
 - **Find & Replace bar** — `⌘F` to open, `Esc` / Done to close,
   `⌘G` / `⇧⌘G` to navigate, live match count. Beeps on boundaries.
 - **Unsaved-change tracking** — dirty flag against the last-saved snapshot;
@@ -70,22 +73,25 @@ Renders `AppIcon.icns` from scratch — no external assets needed. Tweak
 
 ```
 Sources/App/
-  main.swift                    — NSApplication entry
-  AppDelegate.swift             — menus, open flow, deminiaturize, quit prompt
-  DocumentStore.swift           — ObservableObject state per document
-  DocumentWindowController.swift— per-window controller, save/close/reload
-  EditorBridge.swift            — shared handle to the WKWebView + search API
-  EditorView.swift              — SwiftUI shell hosting FindBar + web editor
-  FindBar.swift                 — Find & Replace bar
-  MarkdownWebEditor.swift       — WKWebView + Toast UI Editor bridge (JS/CSS
-                                  inlined; search runs inside the ProseMirror
-                                  DOM)
-  Resources/toastui/            — bundled Toast UI Editor JS + CSS
+  main.swift                     — NSApplication entry
+  AppDelegate.swift              — menus, open-file/folder routing, quit prompt
+  DocumentStore.swift            — ObservableObject state per document
+  WorkspaceStore.swift           — one open folder + recursive file tree
+  TabbedDocumentModel.swift      — open-tabs collection + active index
+  MarkdownWindowController.swift — one window: sidebar? + tabs + editor
+  MarkdownWindowView.swift       — SwiftUI shell (sidebar | tabs / find / editor)
+  FileTreeView.swift             — workspace sidebar
+  TabBar.swift                   — in-window tab strip
+  FindBar.swift                  — find & replace
+  EditorBridge.swift             — per-tab imperative search / replace API
+  MarkdownWebEditor.swift        — WKWebView + Toast UI Editor bridge (JS/CSS
+                                   inlined; search runs inside ProseMirror DOM)
+  Resources/toastui/             — bundled Toast UI Editor JS + CSS
 scripts/
-  make-app-bundle.sh            — build, sign, install
-  make-icon.swift               — regenerate AppIcon.icns
-VERSION                         — single source of truth for version stamping
-AppIcon.icns                    — packed icon set
+  make-app-bundle.sh             — build, sign, install
+  make-icon.swift                — regenerate AppIcon.icns
+VERSION                          — single source of truth for version stamping
+AppIcon.icns                     — packed icon set
 ```
 
 See [`CLAUDE.md`](CLAUDE.md) for the internal architecture notes and the

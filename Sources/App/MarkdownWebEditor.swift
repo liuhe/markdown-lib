@@ -6,8 +6,12 @@ import AppKit
 /// 存储层还是 markdown 文本；WKWebView 侧持有富文本编辑体验。
 /// 把 CSS/JS 直接内联进 HTML 再 loadHTMLString，避免 file:// 的 CORS 限制。
 struct MarkdownWebEditor: NSViewRepresentable {
-    @Binding var markdown: String
+    @ObservedObject var store: DocumentStore
     let bridge: EditorBridge
+    /// Called whenever this editor's WKWebView becomes the first responder
+    /// (or the tab is otherwise reactivated). Lets the window controller
+    /// point the shared search infrastructure at this tab's bridge.
+    var onActivate: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -24,7 +28,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
         webView.setValue(false, forKey: "drawsBackground")
         webView.navigationDelegate = context.coordinator
         webView.dropHandler = { url in
-            (NSApp.delegate as? AppDelegate)?.openFile(at: url)
+            (NSApp.delegate as? AppDelegate)?.open(url: url)
         }
         context.coordinator.webView = webView
         bridge.webView = webView
@@ -34,11 +38,15 @@ struct MarkdownWebEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        // Keep the bridge pointing at the tab's own web view — SwiftUI may
+        // reuse this representable across renders and we want subsequent
+        // search calls routed to the correct WKWebView.
+        bridge.webView = webView
         guard context.coordinator.ready else {
-            context.coordinator.pendingMarkdown = markdown
+            context.coordinator.pendingMarkdown = store.text
             return
         }
-        context.coordinator.push(markdown, to: webView)
+        context.coordinator.push(store.text, to: webView)
     }
 
     // MARK: - HTML 构造：内联 CSS + JS
@@ -578,13 +586,14 @@ struct MarkdownWebEditor: NSViewRepresentable {
             case "ready":
                 ready = true
                 parent.bridge.isEditorReady = true
-                let md = pendingMarkdown ?? parent.markdown
+                let md = pendingMarkdown ?? parent.store.text
                 if let wv = webView { push(md, to: wv) }
                 pendingMarkdown = nil
             case "change":
                 if let md = dict["md"] as? String {
                     lastPushed = md
-                    DispatchQueue.main.async { self.parent.markdown = md }
+                    let store = parent.store
+                    DispatchQueue.main.async { store.text = md }
                 }
             case "openLink":
                 if let s = dict["url"] as? String, let url = URL(string: s) {
@@ -655,7 +664,7 @@ final class DropForwardingWebView: WKWebView {
             return false
         }
         var handled = false
-        for url in urls where isMarkdownURL(url) {
+        for url in urls where isAcceptedURL(url) {
             dropHandler?(url)
             handled = true
         }
@@ -666,10 +675,14 @@ final class DropForwardingWebView: WKWebView {
         guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] else {
             return false
         }
-        return urls.contains(where: isMarkdownURL)
+        return urls.contains(where: isAcceptedURL)
     }
 
-    private func isMarkdownURL(_ url: URL) -> Bool {
+    private func isAcceptedURL(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+            return true
+        }
         let ext = url.pathExtension.lowercased()
         return ["md", "markdown", "mdown", "mkd", "txt"].contains(ext)
     }

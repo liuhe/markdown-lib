@@ -3,12 +3,10 @@ import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private var controllers: [DocumentWindowController] = []
+    private(set) var controllers: [MarkdownWindowController] = []
 
     /// Files handed to `application(_:openFiles:)` before we've finished
-    /// launching. macOS delivers double-click opens right after
-    /// willFinishLaunching, but SwiftUI/NSHostingView is happier if we defer
-    /// window creation until didFinishLaunching.
+    /// launching.
     private var pendingFiles: [URL] = []
     private var didFinishLaunching = false
 
@@ -24,31 +22,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         didFinishLaunching = true
         let queued = pendingFiles
         pendingFiles.removeAll()
-        for url in queued { openFile(at: url) }
+        for url in queued { open(url: url) }
         if controllers.isEmpty {
-            _ = openUntitledWindow()
+            _ = openLooseWindow()
         }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        _ = openUntitledWindow()
+        _ = openLooseWindow()
         return true
     }
 
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
         let urls = filenames.map { URL(fileURLWithPath: $0) }
         if didFinishLaunching {
-            for url in urls { openFile(at: url) }
+            for url in urls { open(url: url) }
         } else {
             pendingFiles.append(contentsOf: urls)
         }
         sender.reply(toOpenOrPrint: .success)
     }
 
-    /// Dock-click / open-again: deminiaturize a hidden window instead of
-    /// silently failing when every window is in the Dock.
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                        hasVisibleWindows flag: Bool) -> Bool {
         if flag { return true }
@@ -57,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         if controllers.isEmpty {
-            _ = openUntitledWindow()
+            _ = openLooseWindow()
         } else {
             controllers.last?.showWindow(nil)
         }
@@ -65,74 +61,116 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // If any dirty windows, prompt for each. Any Cancel aborts quit.
-        let dirty = controllers.filter { $0.store.isDirty }
-        guard !dirty.isEmpty else { return .terminateNow }
-        for c in dirty {
+        for c in controllers where c.hasDirtyTabs {
             c.showWindow(nil)
-            let choice = c.promptUnsavedChanges(reason: .quitting)
-            switch choice {
-            case .save:
-                if !c.saveSynchronously() { return .terminateCancel }
-            case .dontSave:
-                continue
-            case .cancel:
-                return .terminateCancel
-            }
+            if !c.promptAllDirtyForQuit() { return .terminateCancel }
         }
         return .terminateNow
     }
 
     // MARK: - Window/document management
 
-    @discardableResult
-    func openUntitledWindow() -> DocumentWindowController {
-        let store = DocumentStore()
-        return present(store)
+    /// Route a URL: directories open as workspace windows, files open as tabs
+    /// (in the frontmost matching window when possible).
+    func open(url: URL) {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            presentError(NSError(domain: NSCocoaErrorDomain,
+                                 code: NSFileReadNoSuchFileError,
+                                 userInfo: [NSLocalizedDescriptionKey: "No such file: \(url.path)"]))
+            return
+        }
+        if isDir.boolValue {
+            _ = openWorkspaceWindow(rootURL: url)
+        } else {
+            openFile(at: url)
+        }
     }
 
     func openFile(at url: URL) {
-        // Focus existing window if the file is already open.
-        if let existing = controllers.first(where: { $0.store.fileURL == url }) {
-            existing.showWindow(nil)
-            return
-        }
-        // Reuse a clean untitled window if available.
-        if let reuse = controllers.first(where: { $0.store.fileURL == nil && !$0.store.isDirty }) {
-            do {
-                try reuse.store.read(from: url)
-                reuse.refreshTitleAndDocProxy()
-                reuse.showWindow(nil)
-            } catch {
-                presentError(error)
+        // 1. If any window already has this file open, focus that tab.
+        for c in controllers {
+            if let idx = c.tabs.tabs.firstIndex(where: { $0.store.fileURL == url }) {
+                c.tabs.select(idx)
+                c.showWindow(nil)
+                return
             }
+        }
+        // 2. Prefer a window whose workspace contains this file.
+        if let containing = controllers.first(where: {
+            guard let root = $0.workspace?.rootURL.path else { return false }
+            return url.path.hasPrefix(root + "/") || url.path == root
+        }) {
+            containing.openInNewTab(url)
+            containing.showWindow(nil)
             return
         }
-        let store = DocumentStore()
-        do {
-            try store.read(from: url)
-        } catch {
-            presentError(error)
+        // 3. Fall back to the frontmost loose window.
+        if let loose = frontmostController(where: { $0.workspace == nil }) {
+            loose.openInNewTab(url)
+            loose.showWindow(nil)
             return
         }
-        present(store)
+        // 4. Otherwise open a fresh loose window with this file.
+        let c = openLooseWindow(initialURL: url)
+        c.showWindow(nil)
     }
 
     @discardableResult
-    private func present(_ store: DocumentStore) -> DocumentWindowController {
-        let c = DocumentWindowController(store: store, delegate: self)
+    func openLooseWindow(initialURL: URL? = nil) -> MarkdownWindowController {
+        let c = MarkdownWindowController(appDelegate: self, workspace: nil)
+        c.bootstrap(with: initialURL)
         controllers.append(c)
         c.showWindow(nil)
         return c
     }
 
-    func controllerDidClose(_ controller: DocumentWindowController) {
+    @discardableResult
+    func openWorkspaceWindow(rootURL: URL, initialFile: URL? = nil) -> MarkdownWindowController {
+        if let existing = controllers.first(where: { $0.workspace?.rootURL == rootURL }) {
+            if let initial = initialFile { existing.openInNewTab(initial) }
+            existing.showWindow(nil)
+            return existing
+        }
+        let workspace = WorkspaceStore(rootURL: rootURL)
+        let c = MarkdownWindowController(appDelegate: self, workspace: workspace)
+        c.bootstrap(with: initialFile)
+        controllers.append(c)
+        c.showWindow(nil)
+        return c
+    }
+
+    func controllerDidClose(_ controller: MarkdownWindowController) {
         controllers.removeAll { $0 === controller }
+    }
+
+    private func frontmostController(where predicate: (MarkdownWindowController) -> Bool) -> MarkdownWindowController? {
+        let ordered = NSApp.orderedWindows
+        for w in ordered {
+            if let c = controllers.first(where: { $0.window === w }), predicate(c) { return c }
+        }
+        return controllers.first(where: predicate)
+    }
+
+    private func frontmostController() -> MarkdownWindowController? {
+        frontmostController(where: { _ in true })
     }
 
     // MARK: - Menu actions
 
-    @objc func newDocument(_ sender: Any?) { openUntitledWindow() }
+    @objc func newDocument(_ sender: Any?) {
+        // ⌘N: new tab in front window; if there is none, new loose window.
+        if let c = frontmostController() {
+            c.newTab()
+            c.showWindow(nil)
+        } else {
+            _ = openLooseWindow()
+        }
+    }
+
+    @objc func newWindow(_ sender: Any?) {
+        _ = openLooseWindow()
+    }
 
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
@@ -143,7 +181,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.allowedContentTypes = [md, .plainText]
         }
         if panel.runModal() == .OK {
-            for url in panel.urls { openFile(at: url) }
+            for url in panel.urls { open(url: url) }
+        }
+    }
+
+    @objc func openFolder(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        panel.message = "Choose a folder to open as a workspace."
+        if panel.runModal() == .OK, let url = panel.url {
+            _ = openWorkspaceWindow(rootURL: url)
         }
     }
 
@@ -152,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildMainMenu() {
         let menubar = NSMenu()
 
+        // App menu ----------------------------------------------------------
         let appMenuItem = NSMenuItem()
         menubar.addItem(appMenuItem)
         let appMenu = NSMenu()
@@ -177,25 +228,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    keyEquivalent: "q"))
         appMenuItem.submenu = appMenu
 
+        // File menu ---------------------------------------------------------
         let fileItem = NSMenuItem()
         menubar.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(NSMenuItem(title: "New", action: #selector(newDocument(_:)), keyEquivalent: "n"))
-        fileMenu.addItem(NSMenuItem(title: "Open…", action: #selector(openDocument(_:)), keyEquivalent: "o"))
+        fileMenu.addItem(NSMenuItem(title: "New Tab",
+                                    action: #selector(newDocument(_:)),
+                                    keyEquivalent: "n"))
+        let newWin = NSMenuItem(title: "New Window",
+                                action: #selector(newWindow(_:)),
+                                keyEquivalent: "n")
+        newWin.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(newWin)
         fileMenu.addItem(.separator())
-        fileMenu.addItem(NSMenuItem(title: "Close",
+        fileMenu.addItem(NSMenuItem(title: "Open File…",
+                                    action: #selector(openDocument(_:)),
+                                    keyEquivalent: "o"))
+        let openFolderItem = NSMenuItem(title: "Open Folder…",
+                                        action: #selector(openFolder(_:)),
+                                        keyEquivalent: "o")
+        openFolderItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(openFolderItem)
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(NSMenuItem(title: "Close Tab",
                                     action: #selector(NSWindow.performClose(_:)),
                                     keyEquivalent: "w"))
         fileMenu.addItem(NSMenuItem(title: "Save",
-                                    action: #selector(DocumentWindowController.saveDocument(_:)),
+                                    action: #selector(MarkdownWindowController.saveDocument(_:)),
                                     keyEquivalent: "s"))
         let saveAs = NSMenuItem(title: "Save As…",
-                                action: #selector(DocumentWindowController.saveDocumentAs(_:)),
+                                action: #selector(MarkdownWindowController.saveDocumentAs(_:)),
                                 keyEquivalent: "s")
         saveAs.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(saveAs)
         fileItem.submenu = fileMenu
 
+        // Edit menu ---------------------------------------------------------
         let editItem = NSMenuItem()
         menubar.addItem(editItem)
         let editMenu = NSMenu(title: "Edit")
@@ -214,13 +282,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         editMenu.addItem(.separator())
         editMenu.addItem(NSMenuItem(title: "Find…",
-                                    action: #selector(DocumentWindowController.performFind(_:)),
+                                    action: #selector(MarkdownWindowController.performFind(_:)),
                                     keyEquivalent: "f"))
         editMenu.addItem(NSMenuItem(title: "Find Next",
-                                    action: #selector(DocumentWindowController.findNext(_:)),
+                                    action: #selector(MarkdownWindowController.findNext(_:)),
                                     keyEquivalent: "g"))
         let prev = NSMenuItem(title: "Find Previous",
-                              action: #selector(DocumentWindowController.findPrevious(_:)),
+                              action: #selector(MarkdownWindowController.findPrevious(_:)),
                               keyEquivalent: "g")
         prev.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(prev)

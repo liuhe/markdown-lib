@@ -6,6 +6,33 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-23
+
+### Added
+- **Workspace mode**: `File → Open Folder…` (`⇧⌘O`) opens a folder as a
+  workspace. A sidebar file tree lists every file under the root; clicking
+  a text/markdown file opens it as a tab in the same window.
+- **Tabs**: every window now has an in-window tab strip. `⌘N` opens a new
+  tab in the front window; `⇧⌘N` opens a new window; `⌘W` closes the
+  active tab (and the window when the last tab goes); `⌃Tab` / `⌃⇧Tab` and
+  `⌘⇧]` / `⌘⇧[` cycle tabs; `⌘1`…`⌘9` jump to a tab. Tabs preserve their
+  WKWebView state (cursor, scroll, undo history) across switches.
+- **Folder drops**: dropping a directory onto the editor / Dock opens it
+  as a workspace window.
+- Save As inside a workspace defaults to the workspace root.
+
+### Changed
+- Collapsed `DocumentWindowController` into `MarkdownWindowController` —
+  now handles both loose-file and workspace windows behind one class.
+- `MarkdownWebEditor` now takes a `DocumentStore` (@ObservedObject) rather
+  than a raw `Binding<String>` so per-tab state observes correctly.
+- Window title shows both the active tab's name and the workspace name
+  (e.g. `notes.md — Edited — my-notes/`).
+
+### Removed
+- `EditorView.swift` (replaced by `MarkdownWindowView.swift`).
+- `DocumentWindowController.swift` (replaced by `MarkdownWindowController.swift`).
+
 ## [0.2.1] - 2026-08-23
 
 ### Added
