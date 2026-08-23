@@ -22,7 +22,8 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 |---|---|
 | `main.swift` | Top-level `NSApp.run()`. No `@main`. |
 | `AppDelegate.swift` | Menu bar; open panel + folder panel; URL routing (files → tab, folders → workspace window); deminiaturize on Dock click; quit-with-dirty iterates every dirty tab in every window; buffers pre-launch file opens. |
-| `DocumentStore.swift` | `ObservableObject` per document: `text`, `fileURL`, `lastSavedText`, `externallyModified`, disk I/O, 2 s polling timer, 0.5 s self-write debounce. |
+| `DocumentStore.swift` | `ObservableObject` per document: `text` (body only), `rawFrontmatter`, `fileURL`, `lastSavedText`, `externallyModified`, disk I/O, 2 s polling timer, 0.5 s self-write debounce. `title` computed from `rawFrontmatter`; `displayName` prefers `title` over filename. |
+| `Frontmatter.swift` | Pure-Swift YAML-frontmatter helper. `split(_:) → (frontmatter, body)`, `assemble(frontmatter:body:) → String`, `title(in:) → String?`. Frontmatter is stored raw so unknown keys round-trip untouched. |
 | `WorkspaceStore.swift` | Per-window folder root + recursively scanned `FileNode` tree; owns a `FileTreeWatcher` for auto-refresh; exposes `createFile / createFolder / rename / trash` used by the sidebar context menu. |
 | `FileTreeWatcher.swift` | `FSEventStream` wrapper. Recursive, debounced (~300 ms), fires `onChange` on main. Started in `WorkspaceStore.init`, stopped in `deinit`. |
 | `TabbedDocumentModel.swift` | `[DocumentTab]` + `activeIndex`. `DocumentTab` bundles one `DocumentStore` with its own `EditorBridge` so search state is per-tab. |
@@ -159,6 +160,23 @@ persist as bogus spans in the exported markdown.
     `Unmanaged<FileTreeWatcher>.fromOpaque(info).takeUnretainedValue()`.
     The watcher must outlive the stream (it does — we own the
     `FSEventStreamRef` and stop it in `stop()` / `deinit`).
+
+17. **Frontmatter is stored raw and round-tripped verbatim.** The app
+    only *reads* one key (`title`) out of it; everything else is opaque
+    text. This is deliberate — Obsidian/Zola/tools-of-the-user write
+    schemas we don't know about, and re-parsing/re-serializing YAML
+    would silently reorder keys and drop comments. If you add a second
+    known key (e.g. `aliases`), read it with a small greps in
+    `Frontmatter.swift`; don't reach for a real YAML parser unless you
+    also want to own writing YAML back out.
+
+18. **`text` in `DocumentStore` is body-only.** The editor never sees
+    the `---…---` block. Callers who need the full on-disk representation
+    should go through `Frontmatter.assemble(frontmatter:body:)` (which
+    `DocumentStore.write` uses). Dirty tracking compares against the
+    body snapshot, so frontmatter changes made programmatically don't
+    dirty the doc — add explicit dirty bookkeeping if you ever start
+    mutating frontmatter from the app.
 
 ## Versioning + releases
 

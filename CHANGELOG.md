@@ -6,6 +6,20 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-23
+
+### Added
+- **YAML frontmatter roundtrip** in `DocumentStore`. Parses `---…---`
+  block on read and preserves it verbatim on write, so tools that write
+  tags / aliases / custom fields (Obsidian &c.) don't get their metadata
+  corrupted.
+- **`title:` metadata** picked up as the tab label + window title when
+  present, falling back to the filename. No UI to edit yet — this is
+  driven by the file's frontmatter.
+- `Frontmatter.swift` helper (split / assemble / title extractor).
+  Handles CRLF, quoted / unquoted values, inline `# comment` trimming,
+  and ignores `title:` under nested maps.
+
 ## [0.4.0] - 2026-08-23
 
 ### Added

@@ -118,6 +118,13 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
                     self.refreshTitleAndDocProxy()
                 }
                 .store(in: &tabCancellables)
+            tab.store.$rawFrontmatter
+                .receive(on: RunLoop.main)
+                .sink { [weak self, weak tab] _ in
+                    guard let self, let tab, self.tabs.activeTab?.id == tab.id else { return }
+                    self.refreshTitle()
+                }
+                .store(in: &tabCancellables)
             tab.store.$externallyModified
                 .receive(on: RunLoop.main)
                 .sink { [weak self, weak tab] flag in

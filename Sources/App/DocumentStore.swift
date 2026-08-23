@@ -4,14 +4,25 @@ import Combine
 /// Per-window document state. Owns the markdown text, the on-disk URL, the
 /// last-saved snapshot for dirty-tracking, and a 2-second polling timer that
 /// notices external edits.
+///
+/// `text` is the **body** of the document — YAML frontmatter (if any) is
+/// stripped on read and stored separately in `rawFrontmatter` so it survives
+/// a save without the app having to understand its schema. Only known keys
+/// (currently just `title`) are surfaced as computed properties.
 final class DocumentStore: ObservableObject {
 
     @Published var text: String = ""
     @Published private(set) var fileURL: URL? = nil
     @Published private(set) var externallyModified: Bool = false
 
-    /// Snapshot of the text last read from / written to disk. Anything else
-    /// counts as an unsaved edit.
+    /// Raw YAML content between the leading `---` and closing `---`, exactly
+    /// as it was on disk. `nil` when the file has no frontmatter block.
+    /// Reassembled verbatim on save.
+    @Published private(set) var rawFrontmatter: String? = nil
+
+    /// Snapshot of the *body* last read from / written to disk. Dirty tracking
+    /// compares against this, so pure-frontmatter edits don't need special
+    /// casing (we don't currently mutate frontmatter from the app anyway).
     private(set) var lastSavedText: String = ""
 
     /// Modification date of the file as of the last read/write. Used to detect
@@ -29,8 +40,17 @@ final class DocumentStore: ObservableObject {
 
     var isDirty: Bool { text != lastSavedText }
 
+    /// Value of the `title:` key from the frontmatter, or nil if none.
+    var title: String? {
+        guard let fm = rawFrontmatter else { return nil }
+        return Frontmatter.title(in: fm)
+    }
+
+    /// Prefer the frontmatter title, then the filename, then "Untitled".
+    /// Drives tab labels + window title.
     var displayName: String {
-        fileURL?.lastPathComponent ?? "Untitled"
+        if let t = title, !t.isEmpty { return t }
+        return fileURL?.lastPathComponent ?? "Untitled"
     }
 
     // MARK: - Disk I/O
@@ -40,8 +60,10 @@ final class DocumentStore: ObservableObject {
         guard let s = String(data: data, encoding: .utf8) else {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
-        text = s
-        lastSavedText = s
+        let (fm, body) = Frontmatter.split(s)
+        rawFrontmatter = fm
+        text = body
+        lastSavedText = body
         fileURL = url
         lastKnownModDate = modificationDate(of: url)
         externallyModified = false
@@ -57,7 +79,8 @@ final class DocumentStore: ObservableObject {
     func write(to url: URL) throws {
         // Suspend the timer so our own write doesn't look like an external edit.
         stopPolling()
-        try Data(text.utf8).write(to: url, options: .atomic)
+        let full = Frontmatter.assemble(frontmatter: rawFrontmatter, body: text)
+        try Data(full.utf8).write(to: url, options: .atomic)
         lastSavedText = text
         fileURL = url
         lastKnownModDate = modificationDate(of: url)
