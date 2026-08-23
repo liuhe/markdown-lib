@@ -265,6 +265,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fileMenu.addItem(openRecent)
 
         fileMenu.addItem(.separator())
+        fileMenu.addItem(NSMenuItem(title: "Go to File…",
+                                    action: #selector(MarkdownWindowController.gotoFile(_:)),
+                                    keyEquivalent: "p"))
+        fileMenu.addItem(.separator())
         fileMenu.addItem(NSMenuItem(title: "Close Tab",
                                     action: #selector(NSWindow.performClose(_:)),
                                     keyEquivalent: "w"))

@@ -6,6 +6,35 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-23
+
+### Added
+- **Go to File… (`⌘P`)** — Sublime-style fuzzy picker for opening any
+  workspace markdown file. Also in File → Go to File…. Ranking is
+  simple fuzzy score with a big boost for basename hits and word-
+  boundary matches (`-` / `_` / `/` / `.` / space). Enter opens the
+  top match; Esc cancels.
+- **Sidebar empty-area right-click menu.** Right-click on the empty
+  area below the file tree shows New File / New Folder / Reveal in
+  Finder (all rooted at the workspace).
+- **Sidebar action bar** grows two buttons next to the `+` menu:
+  - **Reveal Active File** (`scope` icon). Walks the FileNode graph,
+    expands every ancestor of the current tab's file, sets the sidebar
+    selection to it. Handles file-folder nodes (`X.md` adopting `X/`)
+    correctly by walking the tree, not the path.
+  - **Collapse All** (`rectangle.compress.vertical` icon). Clears the
+    expansion set; the tree collapses back to root children.
+
+### Fixed
+- **Selected folder icon disappeared** against the accent-color selected
+  row background. On the selected row the icon (and disclosure chevron)
+  now uses `.primary` so it contrasts against the highlight.
+
+### Changed
+- `FileLinkPicker` renamed / generalized to `WorkspaceFilePicker`
+  (`title` parameter added; old name kept as a typealias). Both `⌘P`
+  and `⇧⌘K` use it.
+
 ## [0.7.0] - 2026-08-23
 
 ### Changed

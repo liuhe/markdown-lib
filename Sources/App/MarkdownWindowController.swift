@@ -203,6 +203,7 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
                 case "t": self.newTab(); return nil
                 case "f": self.performFind(nil); return nil
                 case "g": self.findNext(nil); return nil
+                case "p": self.gotoFile(nil); return nil
                 default:
                     if let n = Int(key), (1...9).contains(n) {
                         self.tabs.selectAbsolute(n); return nil
@@ -443,6 +444,36 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
         tabs.activeTab?.bridge.requestFileLinkPicker()
     }
 
+    // MARK: - Go to File… (⌘P)
+
+    /// Menu action / ⌘P — open the workspace file picker; on pick, open the
+    /// selected file as a new tab. Loose windows have nothing to search, so
+    /// they beep.
+    @objc func gotoFile(_ sender: Any?) {
+        guard let workspace, let window else { NSSound.beep(); return }
+        let files = Self.collectMarkdownFiles(in: workspace.root)
+        let picker = WorkspaceFilePicker(
+            title: "Go to File…",
+            files: files,
+            workspaceRoot: workspace.rootURL,
+            onPick: { [weak self] target in
+                self?.dismissLinkPickerSheet()
+                self?.openInNewTab(target)
+            },
+            onCancel: { [weak self] in
+                self?.dismissLinkPickerSheet()
+            }
+        )
+        let hosting = NSHostingController(rootView: picker)
+        hosting.view.setFrameSize(NSSize(width: 560, height: 400))
+        let sheet = NSWindow(contentViewController: hosting)
+        sheet.styleMask = [.titled, .fullSizeContentView]
+        sheet.titleVisibility = .hidden
+        sheet.titlebarAppearsTransparent = true
+        linkPickerSheet = sheet
+        window.beginSheet(sheet, completionHandler: nil)
+    }
+
     /// Called from the `pickFileLink` JS message. Opens the workspace file
     /// picker as a sheet; on selection, computes a relative path from the
     /// tab's file and inserts a markdown link at the cursor.
@@ -458,7 +489,8 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
         }
 
         let files = Self.collectMarkdownFiles(in: workspace.root)
-        let picker = FileLinkPicker(
+        let picker = WorkspaceFilePicker(
+            title: "Search workspace files…",
             files: files,
             workspaceRoot: workspace.rootURL,
             onPick: { [weak self] target in self?.finishLinkPicker(pick: target, source: source, tab: tab, defaultLabel: defaultLabel) },

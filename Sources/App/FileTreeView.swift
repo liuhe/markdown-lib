@@ -105,19 +105,49 @@ struct FileTreeView: View {
             .onKeyPress(.rightArrow) { handleRight(items: flat);  return .handled }
             .onKeyPress(.return)     { handleActivate(items: flat); return .handled }
             .onKeyPress(.space)      { handleActivate(items: flat); return .handled }
+            // Empty-area right-click. When SwiftUI picks up the click over
+            // an actual row it also routes through this menu with `urls`
+            // set to the row's URL — mirror the per-row menu in that case
+            // so we don't accidentally drop the row context menu.
+            .contextMenu(forSelectionType: URL.self) { urls in
+                if urls.isEmpty {
+                    Button("New File at Root")   { onNewFile(workspace.rootURL) }
+                    Button("New Folder at Root") { onNewFolder(workspace.rootURL) }
+                    Divider()
+                    Button("Reveal in Finder")   { onReveal(workspace.rootURL) }
+                }
+                // Per-row menu is still supplied via `.contextMenu { … }` on
+                // each row, which takes precedence over this list-level menu
+                // when the click is on a row.
+            }
         }
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text(workspace.rootURL.lastPathComponent)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.head)
-            Spacer()
+            Spacer(minLength: 4)
+
+            Button(action: revealActiveInTree) {
+                Image(systemName: "scope").font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .disabled(activeFileURL == nil)
+            .help("Reveal Active File")
+
+            Button(action: { expanded.removeAll() }) {
+                Image(systemName: "rectangle.compress.vertical").font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .disabled(expanded.isEmpty)
+            .help("Collapse All")
+
             Menu {
                 Button("New File at Root")   { onNewFile(workspace.rootURL) }
                 Button("New Folder at Root") { onNewFolder(workspace.rootURL) }
@@ -135,11 +165,49 @@ struct FileTreeView: View {
         .padding(.vertical, 6)
     }
 
+    // MARK: - Reveal active file
+
+    /// Expand every ancestor node of `activeFileURL` in the tree and set
+    /// selection to it. Ancestors are walked through the FileNode graph
+    /// (not by path decomposition) so file-folder aliasing — where
+    /// `notes.md`'s children come from a sibling `notes/` directory —
+    /// works correctly.
+    private func revealActiveInTree() {
+        guard let target = activeFileURL else { return }
+        guard let chain = Self.ancestorURLs(of: target, in: workspace.root) else {
+            // Not in the current tree (maybe a loose file was opened, or the
+            // tree hasn't finished scanning yet).
+            return
+        }
+        for url in chain where url != workspace.root.url {
+            expanded.insert(url)
+        }
+        selected = target
+        focused = true
+    }
+
+    /// Depth-first search that returns the URLs of every FileNode on the
+    /// path from `node` to a descendant matching `target`, ordered from
+    /// deepest ancestor first (nearest to target) up to `node`.
+    /// Returns nil if `target` is not reachable from `node`.
+    private static func ancestorURLs(of target: URL, in node: FileNode) -> [URL]? {
+        if node.url == target { return [] }
+        guard let children = node.children else { return nil }
+        for c in children {
+            if c.url == target { return [node.url] }
+            if let sub = ancestorURLs(of: target, in: c) {
+                return sub + [node.url]
+            }
+        }
+        return nil
+    }
+
     // MARK: - Row
 
     @ViewBuilder
     private func row(for item: FlatItem, allItems: [FlatItem]) -> some View {
         let isActive = (item.url == activeFileURL)
+        let isSelected = (selected == item.url)
 
         HStack(spacing: 3) {
             // Indent per depth. 12pt is roughly Finder's step.
@@ -153,7 +221,7 @@ struct FileTreeView: View {
             if item.hasChildren {
                 Image(systemName: expanded.contains(item.url) ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
                     .frame(width: 12, height: 14)
                     .contentShape(Rectangle())
                     .onTapGesture { toggleExpansion(item.url) }
@@ -162,7 +230,7 @@ struct FileTreeView: View {
             }
 
             Image(systemName: iconName(for: item))
-                .foregroundStyle(iconColor(for: item))
+                .foregroundStyle(iconColor(for: item, isSelected: isSelected))
                 .font(.system(size: 12))
                 .frame(width: 14)
 
@@ -202,7 +270,12 @@ struct FileTreeView: View {
         return "doc"
     }
 
-    private func iconColor(for item: FlatItem) -> Color {
+    private func iconColor(for item: FlatItem, isSelected: Bool) -> Color {
+        // On the selected row, the List paints the accent color as background.
+        // A blue folder icon on that blue background disappears, so switch
+        // to `.primary` — SwiftUI auto-picks a contrasting foreground for
+        // the selection style.
+        if isSelected { return .primary }
         if item.isDirectory { return .accentColor }
         if item.isFileFolder { return .accentColor.opacity(0.8) }
         if item.canOpen { return .secondary }

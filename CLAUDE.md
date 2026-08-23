@@ -35,7 +35,7 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | `FindBar.swift` | Find & Replace UI. Owns `@FocusState`; drives the *active tab's* `EditorBridge`. |
 | `EditorBridge.swift` | One-per-tab imperative surface + `@Published` state for `FindBar`. Also carries `onFileLinkPickerRequested` closure the window controller wires per tab. |
 | `RelativePath.swift` | Pure helper: `relative(from source: URL, to target: URL) -> String` with percent-encoded components. Used for the Insert Link to File… feature. |
-| `FileLinkPicker.swift` | Modal SwiftUI sheet listing workspace markdown files with a search field; drives `⌘⇧K` / Edit → Insert Link to File…. |
+| `FileLinkPicker.swift` | `WorkspaceFilePicker` — modal SwiftUI sheet listing workspace markdown files with a search field + fuzzy scoring; drives both `⌘P` Go to File… and `⇧⌘K` Insert Link to File…. |
 | `MarkdownWebEditor.swift` | `NSViewRepresentable` around a WKWebView. Loads inlined Toast UI Editor HTML/JS/CSS. Coordinator handles the JS ↔ Swift bridge (`webkit.messageHandlers.editor`). Takes a `DocumentStore` (`@ObservedObject`), not a `Binding<String>`. |
 
 ## The web-view bridge
