@@ -23,7 +23,8 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | `main.swift` | Top-level `NSApp.run()`. No `@main`. |
 | `AppDelegate.swift` | Menu bar; open panel + folder panel; URL routing (files → tab, folders → workspace window); deminiaturize on Dock click; quit-with-dirty iterates every dirty tab in every window; buffers pre-launch file opens. |
 | `DocumentStore.swift` | `ObservableObject` per document: `text`, `fileURL`, `lastSavedText`, `externallyModified`, disk I/O, 2 s polling timer, 0.5 s self-write debounce. |
-| `WorkspaceStore.swift` | Per-window folder root + recursively scanned `FileNode` tree; `refresh()` re-scans on demand. |
+| `WorkspaceStore.swift` | Per-window folder root + recursively scanned `FileNode` tree; owns a `FileTreeWatcher` for auto-refresh; exposes `createFile / createFolder / rename / trash` used by the sidebar context menu. |
+| `FileTreeWatcher.swift` | `FSEventStream` wrapper. Recursive, debounced (~300 ms), fires `onChange` on main. Started in `WorkspaceStore.init`, stopped in `deinit`. |
 | `TabbedDocumentModel.swift` | `[DocumentTab]` + `activeIndex`. `DocumentTab` bundles one `DocumentStore` with its own `EditorBridge` so search state is per-tab. |
 | `MarkdownWindowController.swift` | One `NSWindowController` per window. Owns a `TabbedDocumentModel` and an optional `WorkspaceStore`. Wires save / close / reload dialogs (all scoped to the active tab; close-window iterates every dirty tab). Local `NSEvent` monitor handles ⌘N/O/S/⇧S/W/T/F/G/⇧G/⇧O/⇧N, ⌃Tab, ⌘1…⌘9, ⌘⇧[ / ⌘⇧]. |
 | `MarkdownWindowView.swift` | SwiftUI shell: `[optional FileTreeView | (TabBar / FindBar / editor ZStack)]`. All tabs stay in the hierarchy behind a ZStack + opacity so their WKWebView keeps cursor/scroll/undo history across switches. |
@@ -135,6 +136,29 @@ persist as bogus spans in the exported markdown.
     calls `window.performClose(nil)` itself when the last tab is removed;
     `windowShouldClose` then iterates any remaining dirty tabs for
     confirmation before actually closing.
+
+13. **Sidebar file ops trigger *both* an eager refresh and an FSEvents
+    refresh.** `WorkspaceStore.createFile` etc. call `refresh()` in the
+    same tick so the UI updates immediately; the watcher then fires a
+    second `refresh()` a moment later. Both are idempotent — don't add
+    debouncing to `refresh()` itself.
+
+14. **Rename must go through `TabbedDocumentModel.updateAfterRename`.**
+    Otherwise open tabs for the moved file still hold the old URL,
+    external-mod polling stops noticing edits, and saves would recreate
+    the old path. The helper handles both leaf renames and directory
+    renames (URL prefix rewrite).
+
+15. **Delete: clean tabs close, dirty tabs go Untitled.** Users lose
+    data if we just close a dirty tab whose file was trashed. Instead,
+    `DocumentStore.detachFromDisk()` clears the URL so the next Save
+    triggers Save As.
+
+16. **FSEvents callback is `@convention(c)`.** No captures allowed;
+    context is passed via `info` pointer, unwrapped through
+    `Unmanaged<FileTreeWatcher>.fromOpaque(info).takeUnretainedValue()`.
+    The watcher must outlive the stream (it does — we own the
+    `FSEventStreamRef` and stop it in `stop()` / `deinit`).
 
 ## Versioning + releases
 

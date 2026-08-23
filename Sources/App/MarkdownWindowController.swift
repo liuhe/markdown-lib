@@ -48,7 +48,12 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
             workspace: workspace,
             onOpenFileFromSidebar: { [weak self] url in self?.openInNewTab(url) },
             onCloseTab: { [weak self] idx in self?.closeTab(at: idx) },
-            onNewTab: { [weak self] in self?.newTab() }
+            onNewTab: { [weak self] in self?.newTab() },
+            onNewFile: { [weak self] parent in self?.promptNewFile(under: parent) },
+            onNewFolder: { [weak self] parent in self?.promptNewFolder(under: parent) },
+            onRename: { [weak self] url in self?.promptRename(url) },
+            onDelete: { [weak self] url in self?.confirmDelete(url) },
+            onReveal: { [weak self] url in self?.revealInFinder(url) }
         )
         window.contentView = NSHostingView(rootView: content)
 
@@ -390,6 +395,109 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
             }
         }
         return true
+    }
+
+    // MARK: - Sidebar file ops
+
+    func promptNewFile(under parent: URL) {
+        guard let workspace else { return }
+        guard let name = promptForName(title: "New File",
+                                       message: "Enter a filename (e.g. notes.md).",
+                                       initial: "untitled.md",
+                                       confirm: "Create") else { return }
+        do {
+            let url = try workspace.createFile(under: parent, name: name)
+            openInNewTab(url)
+        } catch {
+            appDelegate?.presentError(error)
+        }
+    }
+
+    func promptNewFolder(under parent: URL) {
+        guard let workspace else { return }
+        guard let name = promptForName(title: "New Folder",
+                                       message: "Enter a folder name.",
+                                       initial: "New Folder",
+                                       confirm: "Create") else { return }
+        do { _ = try workspace.createFolder(under: parent, name: name) }
+        catch { appDelegate?.presentError(error) }
+    }
+
+    func promptRename(_ url: URL) {
+        guard let workspace else { return }
+        guard let name = promptForName(title: "Rename",
+                                       message: "Rename “\(url.lastPathComponent)” to:",
+                                       initial: url.lastPathComponent,
+                                       confirm: "Rename") else { return }
+        if name == url.lastPathComponent { return }
+        do {
+            let newURL = try workspace.rename(url, to: name)
+            tabs.updateAfterRename(from: url, to: newURL)
+            refreshTitleAndDocProxy()
+        } catch {
+            appDelegate?.presentError(error)
+        }
+    }
+
+    func confirmDelete(_ url: URL) {
+        guard let workspace else { return }
+        let alert = NSAlert()
+        alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
+        alert.informativeText = "You can restore it from the Trash later."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
+        showWindow(nil)
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+        do {
+            try workspace.trash(url)
+            let becameEmpty = tabs.updateAfterDelete(url: url)
+            if becameEmpty { tabs.addBlank() }
+            refreshTitleAndDocProxy()
+        } catch {
+            appDelegate?.presentError(error)
+        }
+    }
+
+    func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Modal single-line prompt using NSAlert + an accessory NSTextField.
+    /// Returns the trimmed string on OK, nil on Cancel / empty input.
+    private func promptForName(title: String,
+                               message: String,
+                               initial: String,
+                               confirm: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: confirm)
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = initial
+        // Preselect the basename so typing overwrites it while keeping the
+        // extension visible.
+        if let dotIdx = initial.lastIndex(of: "."), dotIdx != initial.startIndex {
+            let baseCount = initial.distance(from: initial.startIndex, to: dotIdx)
+            DispatchQueue.main.async {
+                field.currentEditor()?.selectedRange = NSRange(location: 0, length: baseCount)
+            }
+        } else {
+            field.selectText(nil)
+        }
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        showWindow(nil)
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return nil }
+        let s = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
     }
 
     // MARK: - External modification prompt

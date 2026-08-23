@@ -6,6 +6,21 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-23
+
+### Added
+- **FSEvents auto-refresh**: workspace sidebar now updates automatically
+  when files change on disk. Recursive watch with a ~300 ms debounce so
+  git checkouts / bulk renames coalesce into one refresh.
+- **Sidebar context menu**: right-click a file or folder for
+  New File · New Folder · Rename… · Delete (to Trash) · Reveal in Finder.
+  The sidebar header has a `+` menu for the same actions at the root.
+- Rename propagates to any open tab whose file lived at (or under) the
+  renamed path via `TabbedDocumentModel.updateAfterRename`.
+- Delete cleanly closes clean tabs of removed files; dirty tabs are
+  converted to Untitled so the user can Save As before the content is
+  gone (`DocumentStore.detachFromDisk`, `retarget(to:)`).
+
 ## [0.3.0] - 2026-08-23
 
 ### Added

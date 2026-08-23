@@ -1,31 +1,22 @@
 import SwiftUI
 
 /// Sidebar file tree for a workspace. Single-click on a text-like file opens
-/// it in a new tab (or focuses the existing tab if already open).
+/// it in a new tab (or focuses the existing tab if already open). Right-click
+/// / control-click surfaces new / rename / delete / reveal actions.
 struct FileTreeView: View {
     @ObservedObject var workspace: WorkspaceStore
     let activeFileURL: URL?
+
     let onOpen: (URL) -> Void
+    let onNewFile: (URL) -> Void          // parent
+    let onNewFolder: (URL) -> Void        // parent
+    let onRename: (URL) -> Void
+    let onDelete: (URL) -> Void
+    let onReveal: (URL) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(workspace.rootURL.lastPathComponent)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                Spacer()
-                Button(action: { workspace.refresh() }) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10, weight: .regular))
-                }
-                .buttonStyle(.borderless)
-                .help("Refresh")
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-
+            header
             Divider()
 
             List {
@@ -37,6 +28,31 @@ struct FileTreeView: View {
             }
             .listStyle(.sidebar)
         }
+    }
+
+    private var header: some View {
+        HStack {
+            Text(workspace.rootURL.lastPathComponent)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+            Spacer()
+            Menu {
+                Button("New File at Root")   { onNewFile(workspace.rootURL) }
+                Button("New Folder at Root") { onNewFolder(workspace.rootURL) }
+                Divider()
+                Button("Reveal in Finder")   { onReveal(workspace.rootURL) }
+                Divider()
+                Button("Refresh")            { workspace.refresh() }
+            } label: {
+                Image(systemName: "plus.circle").font(.system(size: 11))
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 20)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -64,6 +80,20 @@ struct FileTreeView: View {
         .onTapGesture {
             guard !node.isDirectory, editable else { return }
             onOpen(node.url)
+        }
+        .contextMenu {
+            if node.isDirectory {
+                Button("New File")   { onNewFile(node.url) }
+                Button("New Folder") { onNewFolder(node.url) }
+                Divider()
+            } else if editable {
+                Button("Open") { onOpen(node.url) }
+                Divider()
+            }
+            Button("Rename…") { onRename(node.url) }
+            Button("Delete", role: .destructive) { onDelete(node.url) }
+            Divider()
+            Button("Reveal in Finder") { onReveal(node.url) }
         }
     }
 }

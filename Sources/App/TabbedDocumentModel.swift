@@ -93,4 +93,47 @@ final class TabbedDocumentModel: ObservableObject {
         let idx = oneBasedIndex - 1
         if tabs.indices.contains(idx) { activeIndex = idx }
     }
+
+    // MARK: - Post-op sync (called after sidebar file ops)
+
+    /// Update every tab whose file lives at (or under) `oldURL` so it now
+    /// points at the corresponding path under `newURL`. Handles renames of
+    /// both leaves and directories.
+    func updateAfterRename(from oldURL: URL, to newURL: URL) {
+        let oldPath = oldURL.standardizedFileURL.path
+        for tab in tabs {
+            guard let url = tab.store.fileURL else { continue }
+            let p = url.standardizedFileURL.path
+            if p == oldPath {
+                tab.store.retarget(to: newURL)
+            } else if p.hasPrefix(oldPath + "/") {
+                let suffix = String(p.dropFirst(oldPath.count))
+                let rebuilt = URL(fileURLWithPath: newURL.standardizedFileURL.path + suffix)
+                tab.store.retarget(to: rebuilt)
+            }
+        }
+    }
+
+    /// Called after `url` (a file or a directory) is deleted. Any tab whose
+    /// file lived under that path is either closed (if clean) or converted
+    /// to Untitled (if dirty, so the user can Save As before it's gone).
+    /// Returns `true` if the model is now empty.
+    @discardableResult
+    func updateAfterDelete(url: URL) -> Bool {
+        let deletedPath = url.standardizedFileURL.path
+        var removedIndices: [Int] = []
+        for (i, tab) in tabs.enumerated() {
+            guard let fileURL = tab.store.fileURL else { continue }
+            let p = fileURL.standardizedFileURL.path
+            let matches = (p == deletedPath) || p.hasPrefix(deletedPath + "/")
+            guard matches else { continue }
+            if tab.store.isDirty {
+                tab.store.detachFromDisk()
+            } else {
+                removedIndices.append(i)
+            }
+        }
+        for i in removedIndices.reversed() { _ = remove(at: i) }
+        return tabs.isEmpty
+    }
 }

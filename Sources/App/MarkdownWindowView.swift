@@ -13,6 +13,11 @@ struct MarkdownWindowView: View {
     let onOpenFileFromSidebar: (URL) -> Void
     let onCloseTab: (Int) -> Void
     let onNewTab: () -> Void
+    let onNewFile: (URL) -> Void
+    let onNewFolder: (URL) -> Void
+    let onRename: (URL) -> Void
+    let onDelete: (URL) -> Void
+    let onReveal: (URL) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -20,7 +25,12 @@ struct MarkdownWindowView: View {
                 FileTreeView(
                     workspace: ws,
                     activeFileURL: tabs.activeTab?.store.fileURL,
-                    onOpen: onOpenFileFromSidebar
+                    onOpen: onOpenFileFromSidebar,
+                    onNewFile: onNewFile,
+                    onNewFolder: onNewFolder,
+                    onRename: onRename,
+                    onDelete: onDelete,
+                    onReveal: onReveal
                 )
                 .frame(minWidth: 180, idealWidth: 220, maxWidth: 360)
                 .background(Color(nsColor: .windowBackgroundColor))

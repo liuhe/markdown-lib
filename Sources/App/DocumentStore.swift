@@ -71,6 +71,30 @@ final class DocumentStore: ObservableObject {
         try write(to: url)
     }
 
+    /// Point the store at a new URL without re-reading — used after an
+    /// external rename that we performed ourselves via `WorkspaceStore`.
+    /// Disk contents didn't change, so `text` / `lastSavedText` stay put; we
+    /// just re-baseline the modification date.
+    func retarget(to url: URL) {
+        stopPolling()
+        fileURL = url
+        lastKnownModDate = modificationDate(of: url)
+        lastSelfWriteTime = Date()
+        externallyModified = false
+        startPolling()
+    }
+
+    /// Called when the on-disk file backing this store has been deleted. We
+    /// clear the URL so the store looks "untitled", which forces a Save As
+    /// on the next save. Dirty state is preserved.
+    func detachFromDisk() {
+        stopPolling()
+        fileURL = nil
+        lastKnownModDate = nil
+        lastSelfWriteTime = nil
+        externallyModified = false
+    }
+
     // MARK: - External-change polling
 
     private func startPolling() {
