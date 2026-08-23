@@ -6,6 +6,32 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-23
+
+### Fixed
+- **Multi-second workspace scans blocking the UI.** Opening a large
+  monorepo (e.g. Uber's `eats-customer-be`) was walking every
+  `node_modules` / `bazel-*` / `build` tree on the main queue —
+  `WorkspaceStore.refresh` clocked 1–2 s per FSEvent, producing the
+  intermittent stalls users saw.
+
+### Changed
+- Scans now run on a background queue (`mdlib.workspace.scan`,
+  userInitiated). A version counter drops stale results if a newer scan
+  starts before an older one finishes. The `@Published root` assignment
+  is the only main-thread work. Workspace windows open instantly with
+  an empty tree; the real one fills in a moment later.
+- `.gitignore` at the workspace root is now honored. Basename-level
+  patterns (with fnmatch(3) globs so `bazel-*`, `*.log`, etc. work)
+  are re-read on every scan. Path-scoped patterns (`src/foo`) and
+  negations (`!keep`) aren't supported yet.
+- Built-in noise-directory list still applies as a safety net:
+  `node_modules`, `build`, `dist`, `out`, `target`, `Pods`,
+  `DerivedData`, `__pycache__`, `.mypy_cache`, `.pytest_cache`,
+  `vendor`, `bazel-*`.
+- `scan` caches `resourceValues(isDirectoryKey)` once per URL instead
+  of stat-ing each entry three times.
+
 ## [0.6.4] - 2026-08-23
 
 ### Fixed

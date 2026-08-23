@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Combine
+import Darwin
 
 /// One node in the workspace file tree.
 ///
@@ -68,17 +69,116 @@ final class WorkspaceStore: ObservableObject {
     private static let markdownExtensionPriority: [String] =
         ["md", "markdown", "mdown", "mkd"]
 
+    /// Non-hidden directory names we always skip during scans — every one of
+    /// them is huge in the wild and none of them ever hold user-editable
+    /// markdown. Dotfile dirs (`.git`, `.build`, `.venv`, …) already get
+    /// dropped by `.skipsHiddenFiles`.
+    private static let ignoredDirectoryNames: Set<String> = [
+        "node_modules",
+        "build", "dist", "out", "target",
+        "Pods", "DerivedData",
+        "__pycache__", ".mypy_cache", ".pytest_cache",
+        "vendor",
+    ]
+
+    /// Directories whose names start with any of these prefixes are also
+    /// skipped. Bazel scatters `bazel-<workspace>` symlinks throughout a repo
+    /// that point back at massive build output.
+    private static let ignoredDirectoryPrefixes: [String] = [
+        "bazel-",
+    ]
+
+    /// Compiled `.gitignore` matcher — basename-level patterns only, with
+    /// fnmatch(3)-style globs so `bazel-*`, `*.log`, etc. work.
+    struct IgnoreMatcher {
+        let patterns: [String]
+
+        static let empty = IgnoreMatcher(patterns: [])
+
+        static func loadFromWorkspace(_ rootURL: URL) -> IgnoreMatcher {
+            let gitignore = rootURL.appendingPathComponent(".gitignore")
+            guard let content = try? String(contentsOf: gitignore, encoding: .utf8) else {
+                return .empty
+            }
+            var patterns: [String] = []
+            for raw in content.split(separator: "\n", omittingEmptySubsequences: false) {
+                var line = String(raw).trimmingCharacters(in: .whitespaces)
+                if line.isEmpty { continue }
+                if line.hasPrefix("#") { continue }
+                // Negation patterns aren't worth the complexity for us; skip
+                // them so we don't accidentally *include* something the user
+                // marked back as visible.
+                if line.hasPrefix("!") { continue }
+                // Directory-only marker (trailing `/`) — strip; we treat the
+                // pattern as basename match either way.
+                if line.hasSuffix("/") { line.removeLast() }
+                // Skip anything with a path separator in the middle — that
+                // would require path-aware matching, which we don't do yet.
+                // Common monorepo entries (`node_modules`, `bazel-*`, `.env`)
+                // are basename patterns, so this still covers the bulk.
+                if line.contains("/") { continue }
+                patterns.append(line)
+            }
+            return IgnoreMatcher(patterns: patterns)
+        }
+
+        func matches(name: String) -> Bool {
+            guard !patterns.isEmpty else { return false }
+            return name.withCString { nameC in
+                for pat in patterns {
+                    let matched = pat.withCString { patC in
+                        Darwin.fnmatch(patC, nameC, 0) == 0
+                    }
+                    if matched { return true }
+                }
+                return false
+            }
+        }
+    }
+
+    /// Background queue for tree walks. Serial so back-to-back refreshes
+    /// don't double-scan; the version counter drops stale results anyway.
+    private let scanQueue = DispatchQueue(label: "mdlib.workspace.scan", qos: .userInitiated)
+
+    /// Bumped on every `refresh()` call. The completion handler on `scanQueue`
+    /// only publishes if its version still matches — coalesces bursts and
+    /// prevents an old, slow scan from clobbering a newer result.
+    private var scanVersion: UInt64 = 0
+
     init(rootURL: URL) {
         self.rootURL = rootURL
-        self.root = Self.scan(url: rootURL)
+        // Placeholder empty tree so the sidebar shows immediately with the
+        // right root name; the real scan fills it in via `refresh()` below.
+        self.root = FileNode(url: rootURL, isDirectory: true, children: [])
         startWatching()
+        refresh()
     }
 
     deinit { watcher?.stop() }
 
+    /// Kick off a scan on the background queue and publish the result on
+    /// main when it's the freshest one. Cheap on the calling thread — no
+    /// filesystem work happens here. `.gitignore` is re-parsed on each
+    /// refresh (tiny file) so pattern edits take effect on the next FSEvent
+    /// tick.
     func refresh() {
-        PerfLog.measure("WorkspaceStore.refresh(\(rootURL.lastPathComponent))") {
-            root = Self.scan(url: rootURL)
+        scanVersion &+= 1
+        let version = scanVersion
+        let url = rootURL
+        scanQueue.async { [weak self] in
+            let ignore = IgnoreMatcher.loadFromWorkspace(url)
+            let started = CFAbsoluteTimeGetCurrent()
+            let node = Self.scan(url: url, ignore: ignore)
+            let elapsed = CFAbsoluteTimeGetCurrent() - started
+            if elapsed > PerfLog.slowBlockThreshold {
+                PerfLog.write("⚠️ [slow] WorkspaceStore.scan(\(url.lastPathComponent)): \(PerfLog.ms(elapsed)) ms (background, \(ignore.patterns.count) gitignore rules)")
+            }
+            DispatchQueue.main.async {
+                guard let self, version == self.scanVersion else { return }
+                PerfLog.measure("WorkspaceStore.publish(\(url.lastPathComponent))") {
+                    self.root = node
+                }
+            }
         }
     }
 
@@ -351,7 +451,13 @@ final class WorkspaceStore: ObservableObject {
     /// Recursively build the tree rooted at `url`. Folds each markdown file
     /// that has a same-basename sibling directory into a single "file-folder"
     /// node, hiding the directory itself so the sidebar shows one line.
-    private static func scan(url: URL) -> FileNode {
+    private static func shouldIgnoreDirectory(named name: String) -> Bool {
+        if ignoredDirectoryNames.contains(name) { return true }
+        for p in ignoredDirectoryPrefixes where name.hasPrefix(p) { return true }
+        return false
+    }
+
+    private static func scan(url: URL, ignore: IgnoreMatcher) -> FileNode {
         let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
         if !isDir {
             return FileNode(url: url, isDirectory: false, children: nil)
@@ -363,18 +469,32 @@ final class WorkspaceStore: ObservableObject {
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         )) ?? []
 
+        // Cache the `isDirectory` lookup once per URL + drop noise directories
+        // eagerly. The `resourceValues` call is a stat() under the hood; doing
+        // it three times per URL (bucketing / adopting / sorting) added up in
+        // large repos.
+        struct Entry { let url: URL; let isDirectory: Bool }
+        var entries: [Entry] = []
+        entries.reserveCapacity(contents.count)
+        for item in contents {
+            let name = item.lastPathComponent
+            let itemIsDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if itemIsDir && shouldIgnoreDirectory(named: name) { continue }
+            if ignore.matches(name: name) { continue }
+            entries.append(Entry(url: item, isDirectory: itemIsDir))
+        }
+
         // Bucket by (name, is-dir) so we can pair .md files with dirs of the
         // same basename.
         var dirsByName: [String: URL] = [:]
         var filesByBasename: [String: [URL]] = [:]  // basename → matching files
 
-        for item in contents {
-            let itemIsDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            if itemIsDir {
-                dirsByName[item.lastPathComponent] = item
-            } else if markdownExtensions.contains(item.pathExtension.lowercased()) {
-                let basename = item.deletingPathExtension().lastPathComponent
-                filesByBasename[basename, default: []].append(item)
+        for e in entries {
+            if e.isDirectory {
+                dirsByName[e.url.lastPathComponent] = e.url
+            } else if markdownExtensions.contains(e.url.pathExtension.lowercased()) {
+                let basename = e.url.deletingPathExtension().lastPathComponent
+                filesByBasename[basename, default: []].append(e.url)
             }
         }
 
@@ -399,13 +519,14 @@ final class WorkspaceStore: ObservableObject {
         // file-folder nodes that carry the (recursively scanned) dir's
         // children.
         var childNodes: [FileNode] = []
-        for item in contents {
-            let itemIsDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        for e in entries {
+            let item = e.url
+            let itemIsDir = e.isDirectory
             if itemIsDir {
                 if adoptedDirs.contains(item) { continue }
-                childNodes.append(scan(url: item))
+                childNodes.append(scan(url: item, ignore: ignore))
             } else if let companion = mdAdopters[item] {
-                let dirNode = scan(url: companion)
+                let dirNode = scan(url: companion, ignore: ignore)
                 childNodes.append(FileNode(
                     url: item,
                     isDirectory: false,

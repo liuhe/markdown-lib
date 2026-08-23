@@ -25,7 +25,7 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | `RecentsStore.swift` | Two `UserDefaults`-backed lists (Recent Files, Recent Folders), deduped + capped (20 / 15). Written by `AppDelegate.openFile / openWorkspaceWindow`, read by the Open Recent menu delegate. |
 | `DocumentStore.swift` | `ObservableObject` per document: `text` (body only), `rawFrontmatter`, `fileURL`, `lastSavedText`, `externallyModified`, disk I/O, 2 s polling timer, 0.5 s self-write debounce. `title` computed from `rawFrontmatter`; `displayName` prefers `title` over filename. |
 | `Frontmatter.swift` | Pure-Swift YAML-frontmatter helper. `split(_:) → (frontmatter, body)`, `assemble(frontmatter:body:) → String`, `title(in:) → String?`. Frontmatter is stored raw so unknown keys round-trip untouched. |
-| `WorkspaceStore.swift` | Per-window folder root + recursively scanned `FileNode` tree; owns a `FileTreeWatcher` for auto-refresh; exposes `createFile / createFolder / rename / trash` used by the sidebar context menu. |
+| `WorkspaceStore.swift` | Per-window folder root + recursively scanned `FileNode` tree; owns a `FileTreeWatcher` for auto-refresh; exposes `createFile / createFolder / rename / trash / move`. Scan runs off-main on a serial `userInitiated` queue with a version counter; noise dirs (built-in list + root `.gitignore` basename patterns via fnmatch(3)) are skipped. |
 | `FileTreeWatcher.swift` | `FSEventStream` wrapper. Recursive, debounced (~300 ms), fires `onChange` on main. Started in `WorkspaceStore.init`, stopped in `deinit`. |
 | `TabbedDocumentModel.swift` | `[DocumentTab]` + `activeIndex`. `DocumentTab` bundles one `DocumentStore` with its own `EditorBridge` so search state is per-tab. |
 | `MarkdownWindowController.swift` | One `NSWindowController` per window. Owns a `TabbedDocumentModel` and an optional `WorkspaceStore`. Wires save / close / reload dialogs (all scoped to the active tab; close-window iterates every dirty tab). Local `NSEvent` monitor handles ⌘N/O/S/⇧S/W/T/F/G/⇧G/⇧O/⇧N, ⌃Tab, ⌘1…⌘9, ⌘⇧[ / ⌘⇧]. |
@@ -173,8 +173,10 @@ persist as bogus spans in the exported markdown.
 13. **Sidebar file ops trigger *both* an eager refresh and an FSEvents
     refresh.** `WorkspaceStore.createFile` etc. call `refresh()` in the
     same tick so the UI updates immediately; the watcher then fires a
-    second `refresh()` a moment later. Both are idempotent — don't add
-    debouncing to `refresh()` itself.
+    second `refresh()` a moment later. Both are async (background scan
+    with a version counter that drops stale results), so double-firing
+    is cheap. Don't add debouncing to `refresh()` itself — the version
+    counter is the whole coalescing story.
 
 14. **Rename must go through `TabbedDocumentModel.updateAfterRename`.**
     Otherwise open tabs for the moved file still hold the old URL,
