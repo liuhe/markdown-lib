@@ -13,6 +13,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pendingFiles: [URL] = []
     private var didFinishLaunching = false
 
+    /// The empty untitled window we spawn at launch when there's nothing
+    /// else to show. Held weakly and cleared as soon as the user either
+    /// touches it (adds a tab, opens a file into it, edits) or opens
+    /// something into a *different* window (at which point we close it).
+    private weak var launchWindow: MarkdownWindowController?
+
+    /// Muted during quit so the flurry of `controllerDidClose` callbacks
+    /// (one per window torn down by AppKit on termination) doesn't overwrite
+    /// the just-taken pre-quit snapshot with progressively-emptier state.
+    private var isTerminating = false
+
     // MARK: - Lifecycle
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -24,12 +35,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: true)
         didFinishLaunching = true
+
         let queued = pendingFiles
         pendingFiles.removeAll()
-        for url in queued { open(url: url) }
-        if controllers.isEmpty {
-            _ = openLooseWindow()
+
+        if !queued.isEmpty {
+            // Explicit files from Finder — honor those, skip session restore.
+            for url in queued { open(url: url) }
+        } else if !restoreSession() {
+            // Nothing to restore: spawn the ephemeral launch window. It'll
+            // close itself as soon as the user opens something elsewhere.
+            launchWindow = openLooseWindow()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        saveSession()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -65,10 +86,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Snapshot *before* any windows close so the saved session reflects
+        // what's actually open right now, not the empty state we'd see after
+        // AppKit tears each window down during termination.
+        saveSession()
         for c in controllers where c.hasDirtyTabs {
             c.showWindow(nil)
             if !c.promptAllDirtyForQuit() { return .terminateCancel }
         }
+        isTerminating = true
         return .terminateNow
     }
 
@@ -93,32 +119,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func openFile(at url: URL) {
         recents.addFile(url)
-        // 1. If any window already has this file open, focus that tab.
-        for c in controllers {
-            if let idx = c.tabs.tabs.firstIndex(where: { $0.store.fileURL == url }) {
-                c.tabs.select(idx)
-                c.showWindow(nil)
-                return
+        let destination: MarkdownWindowController
+        routing: do {
+            // 1. If any window already has this file open, focus that tab.
+            for c in controllers {
+                if let idx = c.tabs.tabs.firstIndex(where: { $0.store.fileURL == url }) {
+                    c.tabs.select(idx)
+                    destination = c
+                    break routing
+                }
             }
+            // 2. Prefer a window whose workspace contains this file.
+            if let containing = controllers.first(where: {
+                guard let root = $0.workspace?.rootURL.path else { return false }
+                return url.path.hasPrefix(root + "/") || url.path == root
+            }) {
+                containing.openInNewTab(url)
+                destination = containing
+                break routing
+            }
+            // 3. Fall back to the frontmost loose window.
+            if let loose = frontmostController(where: { $0.workspace == nil }) {
+                loose.openInNewTab(url)
+                destination = loose
+                break routing
+            }
+            // 4. Otherwise open a fresh loose window with this file.
+            destination = openLooseWindow(initialURL: url)
         }
-        // 2. Prefer a window whose workspace contains this file.
-        if let containing = controllers.first(where: {
-            guard let root = $0.workspace?.rootURL.path else { return false }
-            return url.path.hasPrefix(root + "/") || url.path == root
-        }) {
-            containing.openInNewTab(url)
-            containing.showWindow(nil)
-            return
-        }
-        // 3. Fall back to the frontmost loose window.
-        if let loose = frontmostController(where: { $0.workspace == nil }) {
-            loose.openInNewTab(url)
-            loose.showWindow(nil)
-            return
-        }
-        // 4. Otherwise open a fresh loose window with this file.
-        let c = openLooseWindow(initialURL: url)
-        c.showWindow(nil)
+        destination.showWindow(nil)
+        retireLaunchWindowIfPossible(destination: destination)
     }
 
     @discardableResult
@@ -133,21 +163,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @discardableResult
     func openWorkspaceWindow(rootURL: URL, initialFile: URL? = nil) -> MarkdownWindowController {
         recents.addFolder(rootURL)
+        let c: MarkdownWindowController
         if let existing = controllers.first(where: { $0.workspace?.rootURL == rootURL }) {
             if let initial = initialFile { existing.openInNewTab(initial) }
-            existing.showWindow(nil)
-            return existing
+            c = existing
+        } else {
+            let workspace = WorkspaceStore(rootURL: rootURL)
+            c = MarkdownWindowController(appDelegate: self, workspace: workspace)
+            c.bootstrap(with: initialFile)
+            controllers.append(c)
         }
-        let workspace = WorkspaceStore(rootURL: rootURL)
-        let c = MarkdownWindowController(appDelegate: self, workspace: workspace)
-        c.bootstrap(with: initialFile)
-        controllers.append(c)
         c.showWindow(nil)
+        retireLaunchWindowIfPossible(destination: c)
         return c
+    }
+
+    /// If the app-launch untitled window is still untouched (one blank clean
+    /// tab), close it. If the user's action ended up in the launch window
+    /// itself (e.g., `openFile` routed a file into it as a new tab), just
+    /// forget it — it's no longer ephemeral.
+    private func retireLaunchWindowIfPossible(destination: MarkdownWindowController) {
+        guard let launch = launchWindow else { return }
+        if launch === destination {
+            launchWindow = nil
+            return
+        }
+        let launchTabs = launch.tabs.tabs
+        let isUntouched = launchTabs.count == 1
+            && launchTabs[0].store.fileURL == nil
+            && !launchTabs[0].store.isDirty
+        launchWindow = nil
+        if isUntouched {
+            launch.window?.performClose(nil)
+        }
     }
 
     func controllerDidClose(_ controller: MarkdownWindowController) {
         controllers.removeAll { $0 === controller }
+        // Keep session snapshot fresh as windows come and go; that way a
+        // crash doesn't lose the state built up between quits. Muted during
+        // termination — we already saved the pre-quit snapshot.
+        if !isTerminating { saveSession() }
     }
 
     private func frontmostController(where predicate: (MarkdownWindowController) -> Bool) -> MarkdownWindowController? {
@@ -396,6 +452,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func clearRecents(_ sender: Any?) {
         recents.clearAll()
+    }
+
+    // MARK: - Session save / restore
+
+    private let sessionKey = "SessionState_v1"
+
+    private struct SessionSnapshot: Codable {
+        struct WindowInfo: Codable {
+            let workspacePath: String?
+            let tabPaths: [String]
+            let activeTabIndex: Int
+        }
+        let windows: [WindowInfo]
+    }
+
+    /// Snapshot every window's workspace + tab file paths + active index.
+    /// Untitled / dirty tabs are dropped (nothing to point at on disk);
+    /// windows with neither a workspace nor any file tab aren't recorded.
+    func saveSession() {
+        var snapshotWindows: [SessionSnapshot.WindowInfo] = []
+        for c in controllers {
+            let tabPaths = c.tabs.tabs.compactMap { $0.store.fileURL?.path }
+            let workspacePath = c.workspace?.rootURL.path
+            guard workspacePath != nil || !tabPaths.isEmpty else { continue }
+            snapshotWindows.append(SessionSnapshot.WindowInfo(
+                workspacePath: workspacePath,
+                tabPaths: tabPaths,
+                activeTabIndex: c.tabs.activeIndex
+            ))
+        }
+        let snap = SessionSnapshot(windows: snapshotWindows)
+        if let data = try? JSONEncoder().encode(snap) {
+            UserDefaults.standard.set(data, forKey: sessionKey)
+        }
+    }
+
+    /// Try to rebuild the last session. Returns `true` when at least one
+    /// window was recreated. Missing folders / files are skipped silently.
+    @discardableResult
+    private func restoreSession() -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: sessionKey),
+              let snap = try? JSONDecoder().decode(SessionSnapshot.self, from: data)
+        else { return false }
+
+        var restoredAny = false
+        for w in snap.windows {
+            let validTabURLs = w.tabPaths
+                .map { URL(fileURLWithPath: $0) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+
+            if let wp = w.workspacePath {
+                let wsURL = URL(fileURLWithPath: wp)
+                var isDir: ObjCBool = false
+                let exists = FileManager.default.fileExists(atPath: wsURL.path,
+                                                            isDirectory: &isDir)
+                guard exists, isDir.boolValue else { continue }
+                let first = validTabURLs.first
+                let c = openWorkspaceWindow(rootURL: wsURL, initialFile: first)
+                for u in validTabURLs.dropFirst() { c.openInNewTab(u) }
+                let target = min(max(0, w.activeTabIndex), max(0, c.tabs.tabs.count - 1))
+                c.tabs.select(target)
+                restoredAny = true
+            } else if !validTabURLs.isEmpty {
+                let c = openLooseWindow(initialURL: validTabURLs[0])
+                for u in validTabURLs.dropFirst() { c.openInNewTab(u) }
+                let target = min(max(0, w.activeTabIndex), max(0, c.tabs.tabs.count - 1))
+                c.tabs.select(target)
+                restoredAny = true
+            }
+        }
+        return restoredAny
     }
 
     // MARK: - Errors

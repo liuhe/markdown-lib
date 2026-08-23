@@ -21,7 +21,7 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | File | Responsibility |
 |---|---|
 | `main.swift` | Top-level `NSApp.run()`. No `@main`. |
-| `AppDelegate.swift` | Menu bar; open panel + folder panel; URL routing (files → tab, folders → workspace window); Open Recent submenu (via `NSMenuDelegate.menuNeedsUpdate`); deminiaturize on Dock click; quit-with-dirty iterates every dirty tab in every window; buffers pre-launch file opens. |
+| `AppDelegate.swift` | Menu bar; open panel + folder panel; URL routing (files → tab, folders → workspace window); Open Recent submenu (via `NSMenuDelegate.menuNeedsUpdate`); deminiaturize on Dock click; quit-with-dirty iterates every dirty tab in every window; buffers pre-launch file opens; snapshots session to UserDefaults on `applicationShouldTerminate` + on each window close (muted during termination via `isTerminating`); restores on next launch when no Finder-supplied files. Ephemeral `launchWindow` is retired when the user opens content into a different window. |
 | `RecentsStore.swift` | Two `UserDefaults`-backed lists (Recent Files, Recent Folders), deduped + capped (20 / 15). Written by `AppDelegate.openFile / openWorkspaceWindow`, read by the Open Recent menu delegate. |
 | `DocumentStore.swift` | `ObservableObject` per document: `text` (body only), `rawFrontmatter`, `fileURL`, `lastSavedText`, `externallyModified`, disk I/O, 2 s polling timer, 0.5 s self-write debounce. `title` computed from `rawFrontmatter`; `displayName` prefers `title` over filename. |
 | `Frontmatter.swift` | Pure-Swift YAML-frontmatter helper. `split(_:) → (frontmatter, body)`, `assemble(frontmatter:body:) → String`, `title(in:) → String?`. Frontmatter is stored raw so unknown keys round-trip untouched. |

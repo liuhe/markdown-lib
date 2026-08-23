@@ -6,6 +6,33 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-23
+
+### Added
+- **Session restore on launch.** When the app quits, every open window
+  is snapshotted to `UserDefaults` (workspace root + list of file paths
+  per tab + active-tab index). Next launch restores each window that
+  still exists; missing paths / folders are silently skipped. Snapshot
+  is captured at `applicationShouldTerminate` (before AppKit tears the
+  windows down); per-window closes update it too so a crash doesn't
+  lose state built up between quits.
+- **Retire the launch untitled window automatically.** The empty
+  window we spawn at launch (when there's nothing else to show) is
+  tracked as `launchWindow`. As soon as the user opens a file or folder
+  that lands in a *different* window, if the launch window is still
+  untouched (one blank clean tab, nothing typed), it closes itself.
+  If the user's action routes into the launch window (e.g., File →
+  Open File… into the loose window replaces the untitled tab), we
+  just forget the tracker — it's a real editing surface now.
+
+### Notes
+- Session restore skips windows whose stored files/folders no longer
+  exist on disk, so moving a workspace out from under the app is
+  safe — worst case the window is dropped and a fresh untitled shows.
+- Untitled / dirty tabs aren't persisted (there's no on-disk anchor
+  for them). If you had unsaved work in an untitled tab on quit, macOS
+  wouldn't have let you quit without a Save dialog anyway.
+
 ## [0.8.1] - 2026-08-23
 
 ### Fixed
