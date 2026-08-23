@@ -145,6 +145,11 @@ final class WorkspaceStore: ObservableObject {
     /// prevents an old, slow scan from clobbering a newer result.
     private var scanVersion: UInt64 = 0
 
+    /// Latest `.gitignore` matcher — reloaded on every refresh so pattern
+    /// edits take effect on the next scan, and also queried by the FSEvents
+    /// filter path to decide whether an event batch is worth rescanning for.
+    private var currentIgnore: IgnoreMatcher = .empty
+
     init(rootURL: URL) {
         self.rootURL = rootURL
         // Placeholder empty tree so the sidebar shows immediately with the
@@ -160,18 +165,21 @@ final class WorkspaceStore: ObservableObject {
     /// main when it's the freshest one. Cheap on the calling thread — no
     /// filesystem work happens here. `.gitignore` is re-parsed on each
     /// refresh (tiny file) so pattern edits take effect on the next FSEvent
-    /// tick.
+    /// tick, and the parsed matcher is cached for the FSEvents-path filter.
     func refresh() {
+        let matcher = IgnoreMatcher.loadFromWorkspace(rootURL)
+        currentIgnore = matcher
         scanVersion &+= 1
         let version = scanVersion
         let url = rootURL
         scanQueue.async { [weak self] in
-            let ignore = IgnoreMatcher.loadFromWorkspace(url)
             let started = CFAbsoluteTimeGetCurrent()
-            let node = Self.scan(url: url, ignore: ignore)
+            let node = Self.scan(url: url, ignore: matcher)
             let elapsed = CFAbsoluteTimeGetCurrent() - started
-            if elapsed > PerfLog.slowBlockThreshold {
-                PerfLog.write("⚠️ [slow] WorkspaceStore.scan(\(url.lastPathComponent)): \(PerfLog.ms(elapsed)) ms (background, \(ignore.patterns.count) gitignore rules)")
+            if elapsed > 0.5 {
+                // Only warn when a *background* scan is genuinely slow — the
+                // 50 ms main-thread threshold is way too chatty for tree walks.
+                PerfLog.write("⚠️ [slow] WorkspaceStore.scan(\(url.lastPathComponent)): \(PerfLog.ms(elapsed)) ms (background, \(matcher.patterns.count) gitignore rules)")
             }
             DispatchQueue.main.async {
                 guard let self, version == self.scanVersion else { return }
@@ -180,6 +188,41 @@ final class WorkspaceStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Decide whether an FSEvents batch is worth rescanning for. Returns
+    /// `true` when at least one changed path lives outside every ignored
+    /// subtree; `false` when every path is inside `node_modules`, `.git`,
+    /// `bazel-out`, a `.gitignore`d dir, etc.
+    private func shouldRescan(for changedPaths: [String]) -> Bool {
+        guard !changedPaths.isEmpty else { return true }
+        let rootPath = rootURL.standardizedFileURL.path
+        for path in changedPaths {
+            let std = URL(fileURLWithPath: path).standardizedFileURL.path
+            // Anything outside the root or the root itself: rescan.
+            if !std.hasPrefix(rootPath + "/") { return true }
+            let suffix = String(std.dropFirst(rootPath.count + 1))
+            // Walk components; if any ancestor component is an ignored dir,
+            // the leaf change is confined to noise and this path can be
+            // skipped. Otherwise this path forces a rescan.
+            var confined = false
+            for c in suffix.split(separator: "/") {
+                let comp = String(c)
+                if isIgnoredComponent(comp) { confined = true; break }
+            }
+            if !confined { return true }
+        }
+        return false
+    }
+
+    private func isIgnoredComponent(_ c: String) -> Bool {
+        // Hidden dir prefixes cover .git / .idea / .venv / .DS_Store and the
+        // like, all of which get very chatty during background work.
+        if c.hasPrefix(".") { return true }
+        if Self.ignoredDirectoryNames.contains(c) { return true }
+        for p in Self.ignoredDirectoryPrefixes where c.hasPrefix(p) { return true }
+        if currentIgnore.matches(name: c) { return true }
+        return false
     }
 
     static func isEditable(_ url: URL) -> Bool {
@@ -200,8 +243,11 @@ final class WorkspaceStore: ObservableObject {
     // MARK: - Watching
 
     private func startWatching() {
-        watcher = FileTreeWatcher(url: rootURL) { [weak self] in
-            self?.refresh()
+        watcher = FileTreeWatcher(url: rootURL) { [weak self] paths in
+            guard let self else { return }
+            if self.shouldRescan(for: paths) {
+                self.refresh()
+            }
         }
     }
 

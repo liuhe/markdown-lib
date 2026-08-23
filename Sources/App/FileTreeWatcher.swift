@@ -2,23 +2,28 @@ import Foundation
 import CoreServices
 
 /// Recursive filesystem watcher backed by `FSEventStream`. Coalesces bursts
-/// (the initial event fires immediately after ~150 ms; subsequent events in
-/// the same burst are dropped in favor of the last one).
+/// (a batch fires after the FSEvents latency + a debounce tail). Passes the
+/// unique changed paths from the batch to `onChange` so the caller can decide
+/// whether the changes are worth reacting to (e.g., filter out events under
+/// `node_modules`, `.git`, `bazel-*`).
 final class FileTreeWatcher {
 
-    /// Called on the main queue after debouncing. Fire-and-forget: the
-    /// callback receives no diff, since we always regenerate the tree.
-    var onChange: () -> Void
+    /// Fires on the main queue with the deduped set of paths that changed
+    /// during the debounce window.
+    var onChange: ([String]) -> Void
 
     private var stream: FSEventStreamRef?
     private let debounceQueue = DispatchQueue.main
     private var pending: DispatchWorkItem?
 
+    /// Accumulate paths across FSEvent bursts until the debounce fires.
+    private var pendingPaths: Set<String> = []
+
     /// FSEventStream latency in seconds. Small enough that renames feel
     /// instant but big enough to coalesce a git-checkout or bulk rename.
     private let latency: CFTimeInterval = 0.2
 
-    init(url: URL, onChange: @escaping () -> Void) {
+    init(url: URL, onChange: @escaping ([String]) -> Void) {
         self.onChange = onChange
         start(url: url)
     }
@@ -44,10 +49,19 @@ final class FileTreeWatcher {
             | kFSEventStreamCreateFlagIgnoreSelf
         )
 
-        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        let callback: FSEventStreamCallback = { _, info, count, pathsPtr, _, _ in
             guard let info else { return }
             let watcher = Unmanaged<FileTreeWatcher>.fromOpaque(info).takeUnretainedValue()
-            watcher.trigger()
+            // eventPaths is documented as an NSArray of NSString when the
+            // stream was created without kFSEventStreamCreateFlagUseCFTypes —
+            // which is the default. Bridge to Swift.
+            let ns = unsafeBitCast(pathsPtr, to: NSArray.self)
+            var changed: [String] = []
+            changed.reserveCapacity(count)
+            for i in 0..<count {
+                if let s = ns[i] as? String { changed.append(s) }
+            }
+            watcher.trigger(paths: changed)
         }
 
         guard let stream = FSEventStreamCreate(
@@ -69,6 +83,7 @@ final class FileTreeWatcher {
     func stop() {
         pending?.cancel()
         pending = nil
+        pendingPaths.removeAll()
         if let stream {
             FSEventStreamStop(stream)
             FSEventStreamInvalidate(stream)
@@ -77,12 +92,18 @@ final class FileTreeWatcher {
         }
     }
 
-    private func trigger() {
+    private func trigger(paths: [String]) {
+        pendingPaths.formUnion(paths)
         pending?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.onChange() }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let batch = Array(self.pendingPaths)
+            self.pendingPaths.removeAll(keepingCapacity: true)
+            self.onChange(batch)
+        }
         pending = work
-        // Extra 100 ms on top of FSEvents' own latency so we collapse the tail
-        // of a burst (e.g., editor writes tmp → rename → touch).
-        debounceQueue.asyncAfter(deadline: .now() + 0.1, execute: work)
+        // Extra 150 ms on top of FSEvents' own latency to collapse busy repos
+        // (git background ops, bazel cache churn) into one batch.
+        debounceQueue.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 }

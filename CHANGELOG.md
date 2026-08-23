@@ -6,6 +6,25 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-08-23
+
+### Fixed
+- **Continuous "slow scan" log spam.** Even though scans no longer
+  blocked the main thread, FSEvents was firing every ~1 s in busy
+  monorepos (git background ops, bazel cache churn, IDE indexes),
+  triggering a full rescan each time. `FileTreeWatcher` now hands the
+  changed paths to `WorkspaceStore.shouldRescan(for:)`, which walks
+  each path's ancestor components and skips the rescan when every path
+  is confined to an ignored subtree (`node_modules`, `.git`, `bazel-*`,
+  anything the built-in list or root `.gitignore` covers, plus
+  dot-prefixed dirs like `.idea` / `.venv`).
+
+### Changed
+- FSEvents debounce bumped from ~100 ms to 150 ms and now accumulates
+  changed paths across all bursts inside the window into one batch.
+- The background scan slow-log threshold moved from 50 ms to 500 ms —
+  50 ms is way too chatty for tree walks even on quiet repos.
+
 ## [0.6.5] - 2026-08-23
 
 ### Fixed
