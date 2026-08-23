@@ -1,38 +1,114 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Sidebar file tree for a workspace. Single-click on a text-like file opens
-/// it in a new tab (or focuses the existing tab if already open). Right-click
-/// / control-click surfaces new / rename / delete / reveal / move actions.
-/// Drag a row onto a folder-like row to move.
+/// Sidebar file tree for a workspace.
+///
+/// Built on a *flat* `List` (not `OutlineGroup`) so we can:
+///   • carry a `URL?` selection that ↑↓ keyboard nav can move,
+///   • expand / collapse dirs ourselves in response to ← / → keys,
+///   • keep everything else — context menu, click-to-open, drag & drop —
+///     working the way it did.
+///
+/// Interaction summary:
+///   Click a file        → select + open (existing behavior)
+///   Click a directory   → select only
+///   Click the ▸/▾ chevr → toggle expansion (doesn't move selection)
+///   ↑ / ↓               → move selection up / down through visible rows
+///   →                   → expand selected dir; if already expanded, jump to first child
+///   ←                   → collapse selected dir; if already collapsed, jump to parent
+///   Enter / Space       → open (files) or toggle expansion (dirs)
 struct FileTreeView: View {
     @ObservedObject var workspace: WorkspaceStore
     let activeFileURL: URL?
 
     let onOpen: (URL) -> Void
-    let onNewFile: (URL) -> Void          // parent
-    let onNewFolder: (URL) -> Void        // parent
+    let onNewFile: (URL) -> Void
+    let onNewFolder: (URL) -> Void
     let onRename: (URL) -> Void
     let onDelete: (URL) -> Void
     let onReveal: (URL) -> Void
-    let onMove: (URL) -> Void              // menu-driven "Move to…"
-    let onDropMove: (URL, URL) -> Void     // (source, target-folder-like)
+    let onMove: (URL) -> Void
+    let onDropMove: (URL, URL) -> Void
+
+    @State private var expanded: Set<URL> = []
+    @State private var selected: URL?
+    @FocusState private var focused: Bool
+
+    // MARK: - Flattened items
+
+    /// One visible row in the sidebar. Depth drives indentation; the flat
+    /// list is recomputed each render from `workspace.root` + `expanded`.
+    private struct FlatItem: Identifiable, Hashable {
+        let url: URL
+        let name: String
+        let depth: Int
+        let isDirectory: Bool
+        let isFileFolder: Bool
+        let canOpen: Bool
+        let hasChildren: Bool
+        let parentURL: URL?
+        var id: URL { url }
+    }
+
+    private var items: [FlatItem] {
+        var out: [FlatItem] = []
+        flatten(workspace.root, depth: -1, parent: nil, into: &out)
+        return out
+    }
+
+    private func flatten(_ node: FileNode, depth: Int, parent: URL?, into out: inout [FlatItem]) {
+        let isSyntheticRoot = (depth < 0)
+        if !isSyntheticRoot {
+            let hasKids = (node.children?.isEmpty == false)
+            let expandable = (node.children != nil)
+            out.append(FlatItem(
+                url: node.url,
+                name: node.name,
+                depth: depth,
+                isDirectory: node.isDirectory,
+                isFileFolder: node.isFileFolder,
+                canOpen: !node.isDirectory && WorkspaceStore.isEditable(node.url),
+                hasChildren: hasKids && expandable,
+                parentURL: parent
+            ))
+        }
+        // Recurse either because we're at the synthetic root (always) or
+        // because this node is user-expanded.
+        if let children = node.children,
+           isSyntheticRoot || expanded.contains(node.url) {
+            for c in children {
+                flatten(c,
+                        depth: depth + 1,
+                        parent: isSyntheticRoot ? nil : node.url,
+                        into: &out)
+            }
+        }
+    }
+
+    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
 
-            List {
-                if let children = workspace.root.children {
-                    OutlineGroup(children, id: \.id, children: \.children) { node in
-                        row(for: node)
-                    }
-                }
+            let flat = items
+            List(flat, selection: $selected) { item in
+                row(for: item, allItems: flat)
+                    .tag(item.url)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 6))
             }
             .listStyle(.sidebar)
+            .focused($focused)
+            .onKeyPress(.leftArrow)  { handleLeft(items: flat);   return .handled }
+            .onKeyPress(.rightArrow) { handleRight(items: flat);  return .handled }
+            .onKeyPress(.return)     { handleActivate(items: flat); return .handled }
+            .onKeyPress(.space)      { handleActivate(items: flat); return .handled }
         }
     }
+
+    // MARK: - Header
 
     private var header: some View {
         HStack {
@@ -59,100 +135,143 @@ struct FileTreeView: View {
         .padding(.vertical, 6)
     }
 
-    private func row(for node: FileNode) -> some View {
-        FileTreeRow(
-            node: node,
-            isActive: node.url == activeFileURL,
-            onOpen: onOpen,
-            onNewFile: onNewFile,
-            onNewFolder: onNewFolder,
-            onRename: onRename,
-            onDelete: onDelete,
-            onReveal: onReveal,
-            onMove: onMove,
-            onDropMove: onDropMove
-        )
-    }
-}
+    // MARK: - Row
 
-/// Extracted so `@State` for hover / drop-highlight lives per row.
-private struct FileTreeRow: View {
-    let node: FileNode
-    let isActive: Bool
+    @ViewBuilder
+    private func row(for item: FlatItem, allItems: [FlatItem]) -> some View {
+        let isActive = (item.url == activeFileURL)
 
-    let onOpen: (URL) -> Void
-    let onNewFile: (URL) -> Void
-    let onNewFolder: (URL) -> Void
-    let onRename: (URL) -> Void
-    let onDelete: (URL) -> Void
-    let onReveal: (URL) -> Void
-    let onMove: (URL) -> Void
-    let onDropMove: (URL, URL) -> Void
+        HStack(spacing: 3) {
+            // Indent per depth. 12pt is roughly Finder's step.
+            if item.depth > 0 {
+                Spacer().frame(width: CGFloat(item.depth) * 12)
+            }
 
-    @State private var isDropTargeted = false
+            // Disclosure chevron. Clicking it toggles WITHOUT changing
+            // selection so users can peek at children without losing where
+            // they were.
+            if item.hasChildren {
+                Image(systemName: expanded.contains(item.url) ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12, height: 14)
+                    .contentShape(Rectangle())
+                    .onTapGesture { toggleExpansion(item.url) }
+            } else {
+                Spacer().frame(width: 12)
+            }
 
-    var body: some View {
-        let editable = !node.isDirectory && WorkspaceStore.isEditable(node.url)
-        HStack(spacing: 4) {
-            Image(systemName: node.isDirectory
-                  ? "folder"
-                  : (editable ? "doc.text" : "doc"))
-                .foregroundStyle(node.isDirectory ? .yellow : .secondary)
-                .font(.system(size: 11))
-            Text(node.name)
+            Image(systemName: iconName(for: item))
+                .foregroundStyle(iconColor(for: item))
                 .font(.system(size: 12))
+                .frame(width: 14)
+
+            Text(item.name)
+                .font(.system(size: 12, weight: isActive ? .semibold : .regular))
                 .lineLimit(1)
-                .foregroundStyle(editable || node.isDirectory ? .primary : .secondary)
-            Spacer()
+                .truncationMode(.middle)
+                .foregroundStyle(item.canOpen || item.isDirectory ? .primary : .secondary)
+
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 1)
+        .padding(.vertical, 2)
+        .padding(.leading, 4)
         .contentShape(Rectangle())
-        .background(rowBackground)
-        .cornerRadius(3)
         .onTapGesture {
-            guard !node.isDirectory, editable else { return }
-            onOpen(node.url)
+            selected = item.url
+            focused = true
+            if item.canOpen { onOpen(item.url) }
         }
-        .contextMenu {
-            if !node.isDirectory && editable {
-                Button("Open") { onOpen(node.url) }
-                Divider()
-            }
-            if node.canAcceptChildren {
-                Button("New File")   { onNewFile(node.url) }
-                Button("New Folder") { onNewFolder(node.url) }
-                Divider()
-            }
-            Button("Rename…") { onRename(node.url) }
-            Button("Move to…") { onMove(node.url) }
-            Button("Delete", role: .destructive) { onDelete(node.url) }
-            Divider()
-            Button("Reveal in Finder") { onReveal(node.url) }
-        }
-        // Drag source — every row is draggable except the workspace root
-        // (which the sidebar doesn't render anyway).
-        .onDrag { NSItemProvider(object: node.url as NSURL) }
-        // Drop target — only folder-like nodes accept moves.
+        .contextMenu { contextMenu(for: item) }
+        .onDrag { NSItemProvider(object: item.url as NSURL) }
         .modifier(
             DropAcceptingIfPossible(
-                canAcceptChildren: node.canAcceptChildren,
-                isTargeted: $isDropTargeted,
-                targetURL: node.url,
+                canAcceptChildren: item.isDirectory || item.isFileFolder,
+                targetURL: item.url,
                 onDrop: onDropMove
             )
         )
     }
 
+    // MARK: - Icons
+
+    private func iconName(for item: FlatItem) -> String {
+        if item.isDirectory { return "folder.fill" }
+        if item.isFileFolder { return "doc.text.fill" }
+        if item.canOpen { return "doc.text" }
+        return "doc"
+    }
+
+    private func iconColor(for item: FlatItem) -> Color {
+        if item.isDirectory { return .accentColor }
+        if item.isFileFolder { return .accentColor.opacity(0.8) }
+        if item.canOpen { return .secondary }
+        return .secondary.opacity(0.5)
+    }
+
+    // MARK: - Context menu
+
     @ViewBuilder
-    private var rowBackground: some View {
-        if isDropTargeted {
-            RoundedRectangle(cornerRadius: 3)
-                .strokeBorder(Color.accentColor, lineWidth: 1.5)
-                .background(Color.accentColor.opacity(0.15).cornerRadius(3))
-        } else if isActive {
-            Color.accentColor.opacity(0.20)
-        } else {
-            Color.clear
+    private func contextMenu(for item: FlatItem) -> some View {
+        if !item.isDirectory && item.canOpen {
+            Button("Open") { onOpen(item.url) }
+            Divider()
+        }
+        if item.isDirectory || WorkspaceStore.isMarkdownFile(item.url) {
+            Button("New File")   { onNewFile(item.url) }
+            Button("New Folder") { onNewFolder(item.url) }
+            Divider()
+        }
+        Button("Rename…") { onRename(item.url) }
+        Button("Move to…") { onMove(item.url) }
+        Button("Delete", role: .destructive) { onDelete(item.url) }
+        Divider()
+        Button("Reveal in Finder") { onReveal(item.url) }
+    }
+
+    // MARK: - Keyboard
+
+    private func toggleExpansion(_ url: URL) {
+        if expanded.contains(url) { expanded.remove(url) }
+        else { expanded.insert(url) }
+    }
+
+    private func handleLeft(items: [FlatItem]) {
+        guard let sel = selected,
+              let item = items.first(where: { $0.url == sel }) else { return }
+        // Expanded dir → collapse; otherwise move to parent.
+        if item.hasChildren && expanded.contains(sel) {
+            expanded.remove(sel)
+        } else if let parent = item.parentURL {
+            selected = parent
+        }
+    }
+
+    private func handleRight(items: [FlatItem]) {
+        guard let sel = selected,
+              let item = items.first(where: { $0.url == sel }) else { return }
+        if item.hasChildren {
+            if !expanded.contains(sel) {
+                expanded.insert(sel)
+            } else {
+                // Already open — jump to the first child (which sits right
+                // after us in the flat list, at depth+1).
+                if let idx = items.firstIndex(where: { $0.url == sel }),
+                   idx + 1 < items.count,
+                   items[idx + 1].depth == item.depth + 1 {
+                    selected = items[idx + 1].url
+                }
+            }
+        }
+    }
+
+    private func handleActivate(items: [FlatItem]) {
+        guard let sel = selected,
+              let item = items.first(where: { $0.url == sel }) else { return }
+        if item.canOpen {
+            onOpen(sel)
+        } else if item.hasChildren {
+            toggleExpansion(sel)
         }
     }
 }
@@ -161,9 +280,10 @@ private struct FileTreeRow: View {
 /// out of the drag session entirely so they don't flicker as targets.
 private struct DropAcceptingIfPossible: ViewModifier {
     let canAcceptChildren: Bool
-    @Binding var isTargeted: Bool
     let targetURL: URL
     let onDrop: (URL, URL) -> Void
+
+    @State private var isTargeted = false
 
     func body(content: Content) -> some View {
         if canAcceptChildren {
@@ -174,6 +294,11 @@ private struct DropAcceptingIfPossible: ViewModifier {
                 }
                 return true
             }
+            .background(
+                isTargeted
+                ? RoundedRectangle(cornerRadius: 3).stroke(Color.accentColor, lineWidth: 1.5)
+                : nil
+            )
         } else {
             content
         }

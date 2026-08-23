@@ -6,6 +6,30 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-23
+
+### Changed
+- **Sidebar overhaul.** Replaced the SwiftUI `OutlineGroup` renderer
+  with a flat `List` we drive ourselves so we can control expansion
+  and selection from the keyboard. Directories now use filled folder
+  icons in the accent color; markdown files use `doc.text` in
+  secondary, non-editable files fade further.
+
+### Added
+- **Selection + keyboard navigation in the sidebar.**
+  - `↑` / `↓`: move selection up / down across visible rows.
+  - `→`: expand the selected directory; if it's already open, jump to
+    the first child.
+  - `←`: collapse the selected directory; if it's already closed,
+    jump to the parent.
+  - `Enter` / `Space`: open selected file, or toggle expansion of
+    selected directory.
+  - Click on a file still opens it (existing behavior); click on a
+    directory selects only; click on the ▸ / ▾ chevron toggles
+    expansion without moving selection.
+- Active-file (currently open in a tab) rows show in bold so the
+  selection and the currently-editing document are distinguishable.
+
 ## [0.6.9] - 2026-08-23
 
 ### Fixed

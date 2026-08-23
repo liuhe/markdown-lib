@@ -30,7 +30,7 @@ Regenerate the icon: `swift scripts/make-icon.swift`.
 | `TabbedDocumentModel.swift` | `[DocumentTab]` + `activeIndex`. `DocumentTab` bundles one `DocumentStore` with its own `EditorBridge` so search state is per-tab. |
 | `MarkdownWindowController.swift` | One `NSWindowController` per window. Owns a `TabbedDocumentModel` and an optional `WorkspaceStore`. Wires save / close / reload dialogs (all scoped to the active tab; close-window iterates every dirty tab). Local `NSEvent` monitor handles ⌘N/O/S/⇧S/W/T/F/G/⇧G/⇧O/⇧N, ⌃Tab, ⌘1…⌘9, ⌘⇧[ / ⌘⇧]. |
 | `MarkdownWindowView.swift` | SwiftUI shell: `[optional FileTreeView | (TabBar / FindBar / editor ZStack)]`. All tabs stay in the hierarchy behind a ZStack + opacity so their WKWebView keeps cursor/scroll/undo history across switches. |
-| `FileTreeView.swift` | Workspace sidebar: `List { OutlineGroup … }`. Single-click opens editable files. |
+| `FileTreeView.swift` | Workspace sidebar: **flat** `List` (not `OutlineGroup`) driven by an explicit `expanded: Set<URL>` + `selected: URL?`. Click a file opens it; click a directory selects only; the chevron toggles expansion without moving selection. Arrows ↑↓ move selection; →/← expand or collapse (or jump child/parent when already in that state); Enter / Space open the file or toggle the dir. |
 | `TabBar.swift` | In-window tab strip with dirty dot + hover × + new-tab button. |
 | `FindBar.swift` | Find & Replace UI. Owns `@FocusState`; drives the *active tab's* `EditorBridge`. |
 | `EditorBridge.swift` | One-per-tab imperative surface + `@Published` state for `FindBar`. Also carries `onFileLinkPickerRequested` closure the window controller wires per tab. |
