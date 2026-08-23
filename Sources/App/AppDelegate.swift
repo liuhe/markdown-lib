@@ -433,26 +433,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                "p", [.command, .option]))
         formatMenu.addItem(.separator())
 
+        // Letter mnemonics — easier to recall than the digit-triplet the
+        // toolbar uses in most editors.
         formatMenu.addItem(fmt("Bullet List",
                                #selector(MarkdownWindowController.formatBulletList(_:)),
-                               "8", [.command, .shift]))
+                               "u", [.command, .shift]))         // Unordered / bUllet
         formatMenu.addItem(fmt("Ordered List",
                                #selector(MarkdownWindowController.formatOrderedList(_:)),
-                               "7", [.command, .shift]))
+                               "l", [.command, .option]))        // numbered List
         formatMenu.addItem(fmt("Task List",
                                #selector(MarkdownWindowController.formatTaskList(_:)),
-                               "9", [.command, .shift]))
+                               "k", [.command, .option]))        // checKbox
         formatMenu.addItem(.separator())
 
         formatMenu.addItem(fmt("Blockquote",
                                #selector(MarkdownWindowController.formatBlockquote(_:)),
-                               ".", [.command, .shift]))
+                               "q", [.command, .option]))        // Quote
         formatMenu.addItem(fmt("Horizontal Rule",
                                #selector(MarkdownWindowController.formatHorizontalRule(_:)),
-                               "-", [.command, .shift]))
+                               "r", [.command, .option]))        // Rule
         formatMenu.addItem(fmt("Table",
                                #selector(MarkdownWindowController.formatTable(_:)),
-                               "t", [.command, .option]))
+                               "t", [.command, .option]))        // Table
 
         formatItem.submenu = formatMenu
 

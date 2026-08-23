@@ -6,6 +6,24 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-23
+
+### Changed
+- **Format shortcuts moved off digits onto letter mnemonics.** The
+  `⌘⇧7 / ⌘⇧8 / ⌘⇧9` list combos and the `⌘⇧. / ⌘⇧-` punctuation
+  combos are hard to remember; letter keys map to the command name.
+
+  | Command | Old | New |
+  |---|---|---|
+  | Bullet List | `⌘⇧8` | `⌘⇧U` (Unordered / bUllet) |
+  | Ordered List | `⌘⇧7` | `⌥⌘L` (numbered List) |
+  | Task List | `⌘⇧9` | `⌥⌘K` (checKbox) |
+  | Blockquote | `⌘⇧.` | `⌥⌘Q` (Quote) |
+  | Horizontal Rule | `⌘⇧-` | `⌥⌘R` (Rule) |
+
+  Heading 1–6 stays on `⌥⌘1..6` — that mapping is universal (Ulysses,
+  Bear, VS Code all do it) and the digits *are* the level.
+
 ## [0.11.0] - 2026-08-23
 
 ### Added
