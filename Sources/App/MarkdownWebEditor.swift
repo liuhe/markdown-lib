@@ -154,16 +154,17 @@ struct MarkdownWebEditor: NSViewRepresentable {
           editor.on('change', function () {
             if (suppressChange) return;
             var raw = editor.getMarkdown();
+            // Normalize on the *outbound* markdown only — DO NOT feed the
+            // normalized copy back into the editor via setMarkdown. Doing so
+            // rebuilds the DOM and wipes any empty paragraph the user just
+            // created by pressing Enter (Toast UI serializes empty <p><br></p>
+            // as a bare "<br>" line, which normalizeMarkdown strips).
+            //
+            // Trade-off: if the "backspace-after-paste eats a list item"
+            // bug that used to be fixed here resurfaces, handle it in a more
+            // targeted spot (paste event or an explicit Backspace keydown
+            // interceptor) instead of on every change.
             var md = normalizeMarkdown(raw);
-            // 粘贴等 mid-session mutation 会在 DOM 里塞 <br> 空段；保存干净还不够，
-            // WYSIWYG DOM 里得同步清掉，否则退格照样跨过空段删列表项
-            if (md !== raw) {
-              var savedOffset = getCursorTextOffset();
-              suppressChange = true;
-              try { editor.setMarkdown(md, false); } finally { suppressChange = false; }
-              // setMarkdown 是异步渲染，等 DOM 重建完再恢复光标
-              setTimeout(function () { setCursorTextOffset(savedOffset); }, 0);
-            }
             if (md === lastPushed) return;
             lastPushed = md;
             window.webkit.messageHandlers.editor.postMessage({ type: 'change', md: md });

@@ -6,6 +6,19 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-23
+
+### Fixed
+- Pressing Enter on an empty line no longer deletes the line. The
+  editor's change handler used to re-`setMarkdown` after stripping
+  `<br>`-only lines, which nuked the empty paragraph the user had just
+  created (Toast UI serializes `<p><br></p>` as a bare `<br>` line).
+  The outbound-to-Swift markdown is still normalized, so the on-disk
+  file stays clean; the in-editor DOM is left alone. If the original
+  "backspace-after-paste eats a list item" bug that motivated the
+  round-trip resurfaces, we'll handle it more surgically (paste event
+  or a Backspace keydown interceptor).
+
 ## [0.5.1] - 2026-08-23
 
 ### Added

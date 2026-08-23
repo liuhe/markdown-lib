@@ -96,11 +96,15 @@ persist as bogus spans in the exported markdown.
    twice (temp file + rename), which used to trip the "modified elsewhere"
    dialog on our own saves.
 
-5. **`<br>` normalization.** Toast UI Editor serializes empty paragraphs as
-   a bare `<br>` on their own line, but the reverse trip doesn't produce a
-   placeable block, so Backspace hops over the empty paragraph and eats the
-   previous list item. `normalizeMarkdown` strips those lines. If you ever
-   add a `save-as-html` path, remember it will lose these empty lines.
+5. **`<br>` normalization is outbound-only.** Toast UI Editor serializes
+   empty paragraphs as a bare `<br>` on their own line. `normalizeMarkdown`
+   strips those lines from the string we hand to Swift so the on-disk file
+   is clean, but do NOT feed the normalized copy back into the editor via
+   `setMarkdown` on every change — that rebuilds the DOM and destroys
+   whatever empty paragraph the user just made with Enter. The old code
+   did this to also fix a "backspace-after-paste eats the previous list
+   item" bug; if that comes back, handle it at the paste event or via a
+   Backspace keydown interceptor, not by round-tripping every keystroke.
 
 6. **URL entity decoding.** Toast UI Editor emits hrefs with `&amp;` in
    place of `&`. Both the JS side (before posting to Swift) and the Swift
