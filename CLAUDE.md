@@ -195,12 +195,17 @@ persist as bogus spans in the exported markdown.
     ends up inside `notes/`. Don't bypass it — call `createFile` even
     when you think you have a plain directory URL.
 
-21. **Rename / trash return arrays** — the primary op plus the
+21. **Rename / trash / move return arrays** — the primary op plus the
     companion-dir op when applicable. `MarkdownWindowController` iterates
     the returned list and updates tabs for every rename pair (both the
     `.md` and the URL-prefix rewrite for anything under the renamed
     directory). If you add another "coupled" op, follow the same pattern
     and make it return every URL it touched.
+
+    Move also uses `resolveParentDirectory` on the destination, so
+    drag-onto-markdown or Move-to-a-markdown-file drops into that file's
+    companion directory (creating it lazily), keeping the "any markdown
+    node is a container" mental model consistent.
 
 22. **Sidebar rename auto-follows `title:` metadata.**
     `syncTitleFollowingFilename` in `MarkdownWindowController` only

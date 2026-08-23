@@ -6,6 +6,22 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-23
+
+### Added
+- **Move** in the sidebar. Right-click any node for **Move to…** (opens
+  an `NSOpenPanel` restricted to the workspace root), or **drag** the
+  row onto a folder-like target. Drop targets highlight while hovered.
+- File-folder sources move their companion directory alongside the `.md`.
+- All affected open tabs get their URLs updated automatically (both the
+  moved node and anything under a moved directory).
+
+### Notes
+- Drop targets are limited to folder-like nodes (real dirs + file-folders).
+  Dropping a markdown file onto a plain leaf is a no-op.
+- Guards: can't move a directory into itself or a descendant, or into
+  its own companion dir. Name conflicts at destination raise an error.
+
 ## [0.5.0] - 2026-08-23
 
 ### Added

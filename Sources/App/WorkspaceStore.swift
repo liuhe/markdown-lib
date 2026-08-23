@@ -200,6 +200,69 @@ final class WorkspaceStore: ObservableObject {
         return renames
     }
 
+    /// Move `url` into `newParent`. Keeps the source's basename; if a name
+    /// clash exists at the destination the caller sees `.exists`. When
+    /// `newParent` is a markdown file the routing goes through its companion
+    /// directory (creating it lazily), so drop-onto-markdown works the same
+    /// as create-inside-markdown.
+    ///
+    /// For a file-folder source (markdown + companion dir), the companion
+    /// dir moves along with the file. Returns every rename that happened so
+    /// the caller can rebase open tabs.
+    @discardableResult
+    func move(_ url: URL, into newParent: URL) throws -> [(from: URL, to: URL)] {
+        try guardInsideWorkspace(url)
+        let destDir = try resolveParentDirectory(newParent)
+
+        // No-op: dropped into current parent.
+        if url.deletingLastPathComponent().standardizedFileURL == destDir.standardizedFileURL {
+            return []
+        }
+        // Guard: don't move a directory into itself or its own descendant.
+        let sourcePath = url.standardizedFileURL.path
+        let destPath = destDir.standardizedFileURL.path
+        if destPath == sourcePath || destPath.hasPrefix(sourcePath + "/") {
+            throw FSError.invalidName
+        }
+        // Also prevent moving a markdown into its own companion dir (would
+        // orphan the pairing).
+        if Self.isMarkdownFile(url) {
+            let companionPath = Self.companionDirectoryURL(for: url).standardizedFileURL.path
+            if destPath == companionPath || destPath.hasPrefix(companionPath + "/") {
+                throw FSError.invalidName
+            }
+        }
+
+        let target = destDir.appendingPathComponent(url.lastPathComponent)
+        if FileManager.default.fileExists(atPath: target.path) { throw FSError.exists(target) }
+
+        var renames: [(from: URL, to: URL)] = []
+        do {
+            try FileManager.default.moveItem(at: url, to: target)
+            renames.append((url, target))
+        } catch { throw FSError.underlying(error) }
+
+        // File-folder: also move the companion dir when the source was one.
+        if Self.isMarkdownFile(url) {
+            let oldCompanion = Self.companionDirectoryURL(for: url)
+            var isDirBool: ObjCBool = false
+            if FileManager.default.fileExists(atPath: oldCompanion.path, isDirectory: &isDirBool),
+               isDirBool.boolValue {
+                let basename = target.deletingPathExtension().lastPathComponent
+                let newCompanion = destDir.appendingPathComponent(basename)
+                if !FileManager.default.fileExists(atPath: newCompanion.path) {
+                    do {
+                        try FileManager.default.moveItem(at: oldCompanion, to: newCompanion)
+                        renames.append((oldCompanion, newCompanion))
+                    } catch { throw FSError.underlying(error) }
+                }
+            }
+        }
+
+        refresh()
+        return renames
+    }
+
     /// Move to Trash. Returns the list of URLs actually trashed — the file
     /// itself plus its companion directory when the file was a markdown with
     /// one alongside.

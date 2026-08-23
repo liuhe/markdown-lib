@@ -53,7 +53,9 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
             onNewFolder: { [weak self] parent in self?.promptNewFolder(under: parent) },
             onRename: { [weak self] url in self?.promptRename(url) },
             onDelete: { [weak self] url in self?.confirmDelete(url) },
-            onReveal: { [weak self] url in self?.revealInFinder(url) }
+            onReveal: { [weak self] url in self?.revealInFinder(url) },
+            onMove:   { [weak self] url in self?.promptMove(url) },
+            onDropMove: { [weak self] src, dst in _ = self?.performMove(source: src, target: dst) }
         )
         window.contentView = NSHostingView(rootView: content)
 
@@ -545,6 +547,55 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
 
     func revealInFinder(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Menu-driven move: ask the user for a destination folder via an
+    /// `NSOpenPanel` rooted at the workspace, then delegate to `performMove`.
+    /// Any user-picked location outside the workspace is rejected with an
+    /// error alert.
+    func promptMove(_ url: URL) {
+        guard let workspace else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Move"
+        panel.message = "Choose a folder inside the workspace to move “\(url.lastPathComponent)” into."
+        panel.directoryURL = url.deletingLastPathComponent()
+        // Restrict picking to inside the workspace root.
+        let response: NSApplication.ModalResponse
+        if let window {
+            response = Self.runAsSheet(panel, on: window)
+        } else {
+            response = panel.runModal()
+        }
+        guard response == .OK, let dest = panel.url else { return }
+        let root = workspace.rootURL.standardizedFileURL.path
+        let destPath = dest.standardizedFileURL.path
+        guard destPath == root || destPath.hasPrefix(root + "/") else {
+            appDelegate?.presentError(WorkspaceStore.FSError.notInWorkspace)
+            return
+        }
+        performMove(source: url, target: dest)
+    }
+
+    /// No-prompt move — used by the sidebar drag-and-drop path. `target`
+    /// may be a directory or a markdown file (routed through its companion
+    /// dir inside `WorkspaceStore.move`).
+    @discardableResult
+    func performMove(source: URL, target: URL) -> Bool {
+        guard let workspace else { return false }
+        do {
+            let renames = try workspace.move(source, into: target)
+            for r in renames {
+                tabs.updateAfterRename(from: r.from, to: r.to)
+            }
+            refreshTitleAndDocProxy()
+            return !renames.isEmpty
+        } catch {
+            appDelegate?.presentError(error)
+            return false
+        }
     }
 
     /// Modal single-line prompt using NSAlert + an accessory NSTextField.

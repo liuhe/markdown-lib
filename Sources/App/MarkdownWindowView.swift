@@ -18,6 +18,8 @@ struct MarkdownWindowView: View {
     let onRename: (URL) -> Void
     let onDelete: (URL) -> Void
     let onReveal: (URL) -> Void
+    let onMove: (URL) -> Void
+    let onDropMove: (URL, URL) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -30,7 +32,9 @@ struct MarkdownWindowView: View {
                     onNewFolder: onNewFolder,
                     onRename: onRename,
                     onDelete: onDelete,
-                    onReveal: onReveal
+                    onReveal: onReveal,
+                    onMove: onMove,
+                    onDropMove: onDropMove
                 )
                 .frame(minWidth: 180, idealWidth: 220, maxWidth: 360)
                 .background(Color(nsColor: .windowBackgroundColor))
