@@ -6,6 +6,16 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-08-23
+
+### Changed
+- **`PerfLog` lines carry a millisecond-precision timestamp** so you
+  can tell "real burst" from "output-buffered flush" apart at a glance
+  (`[mdlib 14:22:07.184] ⚠️ [slow] …`).
+- `setvbuf(stderr, nil, _IONBF, 0)` at monitor start — belt-and-
+  suspenders in case some layer between the process and Terminal
+  starts block-buffering stderr (piped through `tee` or a wrapper).
+
 ## [0.6.6] - 2026-08-23
 
 ### Fixed

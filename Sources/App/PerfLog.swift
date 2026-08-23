@@ -23,6 +23,20 @@ enum PerfLog {
         ProcessInfo.processInfo.environment["MDLIB_PERF"] != "0"
     }()
 
+    /// Called once from `MainThreadStallMonitor.start()`. Kills any stdio
+    /// buffering on `stderr` so log bursts you see in the terminal reflect
+    /// real event bursts, not a batched flush.
+    static func configureStdio() {
+        setvbuf(stderr, nil, _IONBF, 0)
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
     // MARK: - Measure
 
     @discardableResult
@@ -52,7 +66,8 @@ enum PerfLog {
     // MARK: - Write
 
     static func write(_ line: String) {
-        fputs("[mdlib] \(line)\n", stderr)
+        let ts = timeFormatter.string(from: Date())
+        fputs("[mdlib \(ts)] \(line)\n", stderr)
     }
 
     static func ms(_ t: TimeInterval) -> String {
@@ -87,6 +102,7 @@ final class MainThreadStallMonitor {
         guard PerfLog.enabled else { return }
         guard !running else { return }
         running = true
+        PerfLog.configureStdio()
 
         watchQueue.async { [weak self] in
             guard let self else { return }
