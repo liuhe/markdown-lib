@@ -6,6 +6,24 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-23
+
+### Fixed
+- **Cmd+click on a relative-path link no longer errors** with "The
+  application can't be opened. `-50`" (a Launch Services `paramErr`
+  produced by handing it a schemeless URL). The coordinator now
+  resolves the `href` against the tab's `fileURL`, opens `file://`
+  targets as new tabs via `AppDelegate.open(url:)`, and only routes
+  absolute non-file URLs (http, https, mailto, …) to `NSWorkspace`.
+- Resolver tries the href both as a URL string (handles `%20` and
+  friends) and as a raw filesystem path, so links pasted from other
+  tools without percent-encoding also open.
+- Fragment-only links (`#heading`) beep instead of trying to open —
+  we don't have in-doc anchor navigation yet.
+- The WKNavigationDelegate path now goes through the same resolver,
+  so any click that slips past the JS interceptor still routes safely
+  instead of throwing the raw URL at Launch Services.
+
 ## [0.6.2] - 2026-08-23
 
 ### Fixed

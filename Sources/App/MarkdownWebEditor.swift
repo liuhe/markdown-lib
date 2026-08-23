@@ -651,20 +651,74 @@ struct MarkdownWebEditor: NSViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            NSWorkspace.shared.open(decodedHTMLEntities(in: url))
+            // If the navigation somehow slips past the JS Cmd+click handler,
+            // route it through the same path so file:// links land in a tab
+            // and http/https go to the browser. Never blindly pass to
+            // Launch Services — a naked relative href (no scheme) crashes
+            // with `-50 The application can't be opened.`
+            openLinkedHref(url.absoluteString)
             decisionHandler(.cancel)
         }
 
-        /// 把 URL 里残留的 HTML 实体（&amp; / &lt; / &gt; / &quot; / &#39;）还原
-        private func decodedHTMLEntities(in url: URL) -> URL {
-            let s = url.absoluteString
-                .replacingOccurrences(of: "&amp;", with: "&")
-                .replacingOccurrences(of: "&lt;", with: "<")
-                .replacingOccurrences(of: "&gt;", with: ">")
-                .replacingOccurrences(of: "&quot;", with: "\"")
-                .replacingOccurrences(of: "&#39;", with: "'")
-                .replacingOccurrences(of: "&#x27;", with: "'")
-            return URL(string: s) ?? url
+        /// Resolve a link `href` (as delivered by the JS side) into an
+        /// absolute URL and route it appropriately. `file://` targets open
+        /// as new tabs (or reuse existing ones) via `AppDelegate`; anything
+        /// else goes to `NSWorkspace`.
+        ///
+        /// Handles both percent-encoded relative paths (`../ideas%20.md`)
+        /// and raw ones (`../ideas .md`), falling back through both parsing
+        /// strategies before giving up.
+        fileprivate func openLinkedHref(_ raw: String) {
+            let href = decodedHTMLEntitiesString(raw)
+            // Fragment-only link (e.g., `#some-heading`): nothing meaningful
+            // to open — beep so the user knows it registered.
+            if href.hasPrefix("#") { NSSound.beep(); return }
+
+            // Absolute URL with a scheme: dispatch by scheme.
+            if let url = URL(string: href), let scheme = url.scheme, !scheme.isEmpty {
+                if url.isFileURL {
+                    (NSApp.delegate as? AppDelegate)?.open(url: url.standardizedFileURL)
+                } else {
+                    NSWorkspace.shared.open(url)
+                }
+                return
+            }
+
+            // Relative path: resolve against the current document's URL.
+            guard let base = parent.store.fileURL else {
+                // Untitled tab — no anchor to resolve against.
+                NSSound.beep()
+                return
+            }
+            if let resolved = Self.resolveRelative(href: href, base: base) {
+                (NSApp.delegate as? AppDelegate)?.open(url: resolved)
+            } else {
+                NSSound.beep()
+            }
+        }
+
+        /// Try two strategies: first as a URL-encoded relative reference
+        /// (handles `%20` &c.), then as a raw filesystem path if the first
+        /// parse produced nothing usable.
+        private static func resolveRelative(href: String, base: URL) -> URL? {
+            if let url = URL(string: href, relativeTo: base) {
+                let abs = url.absoluteURL.standardizedFileURL
+                if abs.isFileURL { return abs }
+            }
+            let baseDir = base.deletingLastPathComponent()
+            let decoded = href.removingPercentEncoding ?? href
+            return URL(fileURLWithPath: decoded, relativeTo: baseDir)
+                .absoluteURL
+                .standardizedFileURL
+        }
+
+        private func decodedHTMLEntitiesString(_ s: String) -> String {
+            s.replacingOccurrences(of: "&amp;", with: "&")
+             .replacingOccurrences(of: "&lt;", with: "<")
+             .replacingOccurrences(of: "&gt;", with: ">")
+             .replacingOccurrences(of: "&quot;", with: "\"")
+             .replacingOccurrences(of: "&#39;", with: "'")
+             .replacingOccurrences(of: "&#x27;", with: "'")
         }
 
         func userContentController(_ userContentController: WKUserContentController,
@@ -685,8 +739,8 @@ struct MarkdownWebEditor: NSViewRepresentable {
                     DispatchQueue.main.async { store.text = md }
                 }
             case "openLink":
-                if let s = dict["url"] as? String, let url = URL(string: s) {
-                    NSWorkspace.shared.open(url)
+                if let s = dict["url"] as? String {
+                    openLinkedHref(s)
                 }
             case "searchResult":
                 let count = (dict["count"] as? Int) ?? 0

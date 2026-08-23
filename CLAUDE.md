@@ -124,6 +124,18 @@ persist as bogus spans in the exported markdown.
    side (before handing to NSWorkspace) decode these — remove either half
    and Cmd+click will open half-broken URLs.
 
+6b. **Cmd+click link routing resolves against the tab's fileURL.**
+    Never hand a raw href straight to `NSWorkspace.shared.open` — a
+    relative path like `../foo.md` has no scheme and Launch Services
+    rejects it with `-50 The application can't be opened.`
+    `Coordinator.openLinkedHref` is the single entry point: absolute
+    URLs dispatch by scheme (`file://` → `AppDelegate.open` for tab
+    routing; anything else → `NSWorkspace`); relative hrefs get
+    resolved against `parent.store.fileURL` twice (URL-encoded parse,
+    then raw-filesystem-path fallback) so links that came from any tool
+    open. The nav delegate goes through the same helper so a click that
+    slips past the JS interceptor doesn't crash.
+
 7. **Pre-launch file opens.** `application(_:openFiles:)` fires *before*
    `applicationDidFinishLaunching` on Finder double-click. `AppDelegate`
    buffers in `pendingFiles` and drains on `didFinishLaunching`; the first
