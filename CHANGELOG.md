@@ -6,6 +6,39 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-23
+
+### Added
+- **File-folder nodes** in the workspace sidebar. When a markdown file
+  (`notes.md`) has a same-basename sibling directory (`notes/`), the
+  sibling is absorbed as the markdown file's children — the sidebar
+  shows one expandable node instead of a file + folder pair. The
+  markdown file still opens for editing on click; the disclosure
+  indicator expands to reveal the child files.
+- **New File / New Folder under any markdown node.** Right-click a
+  markdown file in the sidebar and pick New File — if its companion
+  directory doesn't exist yet, it's created on demand and the child
+  goes inside.
+- **Rename couples the pair.** Renaming `notes.md` → `ideas.md` also
+  renames `notes/` → `ideas/` (when present), and every open tab
+  pointing at either the file or something under the directory gets its
+  URL updated automatically.
+- **Delete couples the pair.** Deleting a merged markdown node moves
+  both the `.md` and the `/` to the Trash; the confirmation names both.
+- Multi-extension precedence: when several markdown files share a
+  basename with a directory (e.g., `notes.md` and `notes.markdown`
+  alongside `notes/`), `.md > .markdown > .mdown > .mkd`. Only the
+  winner adopts the directory; the others show as leaves.
+
+### Changed
+- `FileNode` gains `companionDirectoryURL`, `isFileFolder`,
+  `isFolderLike`, `canAcceptChildren`.
+- `WorkspaceStore.rename` returns `[(from, to)]` and `trash` returns
+  `[URL]` so the window controller can propagate both the primary
+  operation and its companion.
+- Folder-like nodes (real dirs + file-folders) sort together, above
+  regular files.
+
 ## [0.4.2] - 2026-08-23
 
 ### Added

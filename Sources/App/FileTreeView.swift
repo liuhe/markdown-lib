@@ -82,12 +82,16 @@ struct FileTreeView: View {
             onOpen(node.url)
         }
         .contextMenu {
-            if node.isDirectory {
+            if !node.isDirectory && editable {
+                Button("Open") { onOpen(node.url) }
+                Divider()
+            }
+            if node.canAcceptChildren {
+                // For markdown files, "New File" creates (and if needed
+                // materializes) the sibling directory so children show up
+                // as descendants of this node.
                 Button("New File")   { onNewFile(node.url) }
                 Button("New Folder") { onNewFolder(node.url) }
-                Divider()
-            } else if editable {
-                Button("Open") { onOpen(node.url) }
                 Divider()
             }
             Button("Rename…") { onRename(node.url) }

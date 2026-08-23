@@ -440,9 +440,16 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
         let oldFilename = url.lastPathComponent
         let oldBasename = url.deletingPathExtension().lastPathComponent
         do {
-            let newURL = try workspace.rename(url, to: name)
-            tabs.updateAfterRename(from: url, to: newURL)
-            try syncTitleFollowingFilename(from: (oldFilename, oldBasename), to: newURL)
+            let renames = try workspace.rename(url, to: name)
+            // Apply the URL rewrites to every affected tab (both the
+            // primary rename and the companion-dir rename if there was one).
+            for r in renames {
+                tabs.updateAfterRename(from: r.from, to: r.to)
+            }
+            if let primary = renames.first(where: { $0.from == url }) {
+                try syncTitleFollowingFilename(from: (oldFilename, oldBasename),
+                                               to: primary.to)
+            }
             refreshTitleAndDocProxy()
         } catch {
             appDelegate?.presentError(error)
@@ -506,9 +513,16 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
 
     func confirmDelete(_ url: URL) {
         guard let workspace else { return }
+        let hasCompanion = workspace.hasCompanionDirectory(url)
         let alert = NSAlert()
-        alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
-        alert.informativeText = "You can restore it from the Trash later."
+        if hasCompanion {
+            let dirName = WorkspaceStore.companionDirectoryURL(for: url).lastPathComponent
+            alert.messageText = "Move “\(url.lastPathComponent)” and “\(dirName)/” to the Trash?"
+            alert.informativeText = "The child folder and everything inside it will be trashed too. You can restore from the Trash later."
+        } else {
+            alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
+            alert.informativeText = "You can restore it from the Trash later."
+        }
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Move to Trash")
         alert.addButton(withTitle: "Cancel")
@@ -517,8 +531,11 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
         do {
-            try workspace.trash(url)
-            let becameEmpty = tabs.updateAfterDelete(url: url)
+            let trashed = try workspace.trash(url)
+            var becameEmpty = false
+            for t in trashed {
+                if tabs.updateAfterDelete(url: t) { becameEmpty = true }
+            }
             if becameEmpty { tabs.addBlank() }
             refreshTitleAndDocProxy()
         } catch {

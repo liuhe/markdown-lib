@@ -179,7 +179,30 @@ persist as bogus spans in the exported markdown.
     `rawFrontmatter` directly; you'll bypass the dirty bookkeeping and
     the user can quit without a save prompt.
 
-19. **Sidebar rename auto-follows `title:` metadata.**
+19. **File-folder nodes: `X.md` + `X/` render as one.**
+    `WorkspaceStore.scan` pairs each markdown file with a same-basename
+    sibling directory; the directory itself disappears from the tree and
+    its contents become the markdown file's `children`. Multi-extension
+    conflicts are resolved by `markdownExtensionPriority`
+    (`md > markdown > mdown > mkd`) — the winner adopts the dir, the
+    losers stay as leaves. If you add another priority order the whole
+    sidebar reshuffles, be intentional about it.
+
+20. **File ops on markdown nodes route through the companion dir.**
+    `WorkspaceStore.resolveParentDirectory` is the only place we
+    lazy-create the companion directory. `createFile / createFolder`
+    call it for every parent URL, so "New File under `notes.md`" always
+    ends up inside `notes/`. Don't bypass it — call `createFile` even
+    when you think you have a plain directory URL.
+
+21. **Rename / trash return arrays** — the primary op plus the
+    companion-dir op when applicable. `MarkdownWindowController` iterates
+    the returned list and updates tabs for every rename pair (both the
+    `.md` and the URL-prefix rewrite for anything under the renamed
+    directory). If you add another "coupled" op, follow the same pattern
+    and make it return every URL it touched.
+
+22. **Sidebar rename auto-follows `title:` metadata.**
     `syncTitleFollowingFilename` in `MarkdownWindowController` only
     rewrites `title` when the old value exactly matched the old basename
     or the old filename. Users who set an intentional title (e.g.
