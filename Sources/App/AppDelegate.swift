@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        MainThreadStallMonitor.shared.start()
         buildMainMenu()
     }
 

@@ -101,13 +101,14 @@ persist as bogus spans in the exported markdown.
 
 4b. **Spell check is off by design.** The editor HTML body carries
    `spellcheck="false" autocorrect="off" autocapitalize="off" translate="no"`,
-   and a MutationObserver re-applies those attributes on any
-   contenteditable ProseMirror recreates. macOS `applespell` runs
-   `checkTextInDocument` synchronously on the input path — on longer
-   documents this shows up as intermittent typing pauses. If you ever
-   want spell check back, remove the attributes AND the observer, and
-   consider gating behind a per-document / per-app toggle so users can
-   opt in.
+   and a few post-init sweeps re-apply the same attributes on any
+   contenteditable ProseMirror had already built. macOS `applespell`
+   runs `checkTextInDocument` synchronously on the input path — on
+   longer documents this shows up as intermittent typing pauses.
+   **Don't reinstall the MutationObserver we tried in 0.6.2** — it
+   caught ProseMirror's continuous selection-widget attribute updates
+   and burned 20–50% idle CPU. Body-level inheritance is enough; if a
+   specific mode ever needs re-assertion, hook the specific event.
 
 5. **`<br>` normalization is outbound-only.** Toast UI Editor serializes
    empty paragraphs as a bare `<br>` on their own line. `normalizeMarkdown`

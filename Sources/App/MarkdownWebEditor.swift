@@ -95,25 +95,29 @@ struct MarkdownWebEditor: NSViewRepresentable {
 
           // Kill spellcheck / autocorrect / smart-substitution on every
           // contenteditable ProseMirror creates. WKWebView's spellcheck
-          // path (applespell) hitches the input queue on longer docs —
-          // exactly the "type-type-type … pause" symptom users report.
+          // path (applespell) hitches the input queue on longer docs.
+          //
+          // Body-level `spellcheck="false"` in the HTML template is inherited
+          // by descendants per the HTML spec, so we only need to sweep once
+          // after the editor initializes to cover any element ProseMirror
+          // set up before the observer would have caught it. Do NOT install
+          // a persistent MutationObserver here — an `attributes: true`
+          // subtree observer burned notable idle CPU because ProseMirror
+          // mutates selection-widget attributes continuously.
           function disableSpellCheckOn(el) {
-            if (!el || el.__mdlibSpellDisabled) return;
+            if (!el) return;
             el.setAttribute('spellcheck', 'false');
             el.setAttribute('autocorrect', 'off');
             el.setAttribute('autocapitalize', 'off');
             el.setAttribute('translate', 'no');
-            el.__mdlibSpellDisabled = true;
           }
           function disableSpellCheckEverywhere() {
             var nodes = document.querySelectorAll('[contenteditable]');
             for (var i = 0; i < nodes.length; i++) disableSpellCheckOn(nodes[i]);
           }
-          // Initial sweep + observer for anything ProseMirror recreates later.
           setTimeout(disableSpellCheckEverywhere, 0);
-          new MutationObserver(function () {
-            disableSpellCheckEverywhere();
-          }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['contenteditable', 'spellcheck'] });
+          setTimeout(disableSpellCheckEverywhere, 250);
+          setTimeout(disableSpellCheckEverywhere, 1000);
 
           // 剥掉"整行只有 <br>"的行 —— Toast UI WYSIWYG 里空段落序列化成这个，
           // 但反过来解析时不生成可放光标的块，会让退格跨过整段删掉上面的列表项
@@ -736,7 +740,11 @@ struct MarkdownWebEditor: NSViewRepresentable {
                 if let md = dict["md"] as? String {
                     lastPushed = md
                     let store = parent.store
-                    DispatchQueue.main.async { store.text = md }
+                    DispatchQueue.main.async {
+                        PerfLog.measure("DocumentStore.text = md (\(md.utf8.count) B)") {
+                            store.text = md
+                        }
+                    }
                 }
             case "openLink":
                 if let s = dict["url"] as? String {

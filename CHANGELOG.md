@@ -6,6 +6,30 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-23
+
+### Fixed
+- **Idle CPU (~20–50%) with the app doing nothing.** Traced to the
+  MutationObserver added in 0.6.2 to re-apply `spellcheck="false"` on
+  every DOM attribute change. It caught ProseMirror's continuous
+  selection-widget updates and re-ran a `querySelectorAll` each time.
+  Removed the observer entirely — `spellcheck` is inherited from the
+  HTML body, so a single post-init sweep (0 ms / 250 ms / 1 s) is
+  enough. If ProseMirror ever starts explicitly setting `spellcheck="true"`
+  on its editable, add a narrower fix.
+
+### Added
+- **`PerfLog` + main-thread stall detector** to make future hiccups
+  visible. `⚠️ [slow] label: N ms` prints to stderr when a wrapped
+  block runs longer than 50 ms; `🚨 [main-stall] N ms — last activity: …`
+  prints when the main thread's dispatch latency exceeds 150 ms. The
+  detector uses a semaphore-timed probe (no main-thread heartbeat), so
+  its baseline cost is near zero. Disable with `MDLIB_PERF=0`.
+- Sprinkled `PerfLog.measure` at hot paths: `WorkspaceStore.refresh`,
+  `DocumentStore.read` / `write`, and the per-keystroke `store.text = …`
+  assignment. Watch Console.app / stderr while reproducing a hiccup to
+  see who's on the hook.
+
 ## [0.6.3] - 2026-08-23
 
 ### Fixed

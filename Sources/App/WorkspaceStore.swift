@@ -77,7 +77,9 @@ final class WorkspaceStore: ObservableObject {
     deinit { watcher?.stop() }
 
     func refresh() {
-        root = Self.scan(url: rootURL)
+        PerfLog.measure("WorkspaceStore.refresh(\(rootURL.lastPathComponent))") {
+            root = Self.scan(url: rootURL)
+        }
     }
 
     static func isEditable(_ url: URL) -> Bool {

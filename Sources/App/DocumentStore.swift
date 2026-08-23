@@ -71,19 +71,21 @@ final class DocumentStore: ObservableObject {
     // MARK: - Disk I/O
 
     func read(from url: URL) throws {
-        let data = try Data(contentsOf: url)
-        guard let s = String(data: data, encoding: .utf8) else {
-            throw CocoaError(.fileReadInapplicableStringEncoding)
+        try PerfLog.measure("DocumentStore.read(\(url.lastPathComponent))") {
+            let data = try Data(contentsOf: url)
+            guard let s = String(data: data, encoding: .utf8) else {
+                throw CocoaError(.fileReadInapplicableStringEncoding)
+            }
+            let (fm, body) = Frontmatter.split(s)
+            rawFrontmatter = fm
+            text = body
+            lastSavedText = body
+            frontmatterDirty = false
+            fileURL = url
+            lastKnownModDate = modificationDate(of: url)
+            externallyModified = false
+            startPolling()
         }
-        let (fm, body) = Frontmatter.split(s)
-        rawFrontmatter = fm
-        text = body
-        lastSavedText = body
-        frontmatterDirty = false
-        fileURL = url
-        lastKnownModDate = modificationDate(of: url)
-        externallyModified = false
-        startPolling()
     }
 
     /// Reloads from `fileURL`, discarding any in-memory changes.
@@ -93,17 +95,19 @@ final class DocumentStore: ObservableObject {
     }
 
     func write(to url: URL) throws {
-        // Suspend the timer so our own write doesn't look like an external edit.
-        stopPolling()
-        let full = Frontmatter.assemble(frontmatter: rawFrontmatter, body: text)
-        try Data(full.utf8).write(to: url, options: .atomic)
-        lastSavedText = text
-        frontmatterDirty = false
-        fileURL = url
-        lastKnownModDate = modificationDate(of: url)
-        lastSelfWriteTime = Date()
-        externallyModified = false
-        startPolling()
+        try PerfLog.measure("DocumentStore.write(\(url.lastPathComponent))") {
+            // Suspend the timer so our own write doesn't look like an external edit.
+            stopPolling()
+            let full = Frontmatter.assemble(frontmatter: rawFrontmatter, body: text)
+            try Data(full.utf8).write(to: url, options: .atomic)
+            lastSavedText = text
+            frontmatterDirty = false
+            fileURL = url
+            lastKnownModDate = modificationDate(of: url)
+            lastSelfWriteTime = Date()
+            externallyModified = false
+            startPolling()
+        }
     }
 
     func save() throws {

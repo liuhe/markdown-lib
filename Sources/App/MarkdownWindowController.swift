@@ -107,6 +107,7 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func rebindTabSubscriptions() {
+        PerfLog.mark("MarkdownWindowController.rebindTabSubscriptions(\(tabs.tabs.count))")
         tabCancellables.removeAll()
         for tab in tabs.tabs {
             let id = tab.id
