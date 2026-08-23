@@ -173,10 +173,22 @@ persist as bogus spans in the exported markdown.
 18. **`text` in `DocumentStore` is body-only.** The editor never sees
     the `---…---` block. Callers who need the full on-disk representation
     should go through `Frontmatter.assemble(frontmatter:body:)` (which
-    `DocumentStore.write` uses). Dirty tracking compares against the
-    body snapshot, so frontmatter changes made programmatically don't
-    dirty the doc — add explicit dirty bookkeeping if you ever start
-    mutating frontmatter from the app.
+    `DocumentStore.write` uses). Frontmatter mutations must go through
+    `setFrontmatter(_:)` — it sets `frontmatterDirty`, which `isDirty`
+    ORs with the body-vs-lastSavedText comparison. Never assign to
+    `rawFrontmatter` directly; you'll bypass the dirty bookkeeping and
+    the user can quit without a save prompt.
+
+19. **Sidebar rename auto-follows `title:` metadata.**
+    `syncTitleFollowingFilename` in `MarkdownWindowController` only
+    rewrites `title` when the old value exactly matched the old basename
+    or the old filename. Users who set an intentional title (e.g.
+    `title: My Notes` on `weekly-notes.md`) are left alone. Behavior
+    branches on whether the file is currently open: clean tab → save
+    immediately; dirty tab → mutate in-memory only (user's next save
+    carries it); not-open file → raw read/write. The three paths keep
+    the on-disk state and the sidebar consistent without ever
+    silently-saving a user's dirty edits.
 
 ## Versioning + releases
 

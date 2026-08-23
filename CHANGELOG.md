@@ -6,6 +6,28 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-23
+
+### Added
+- Rename in the workspace sidebar now **auto-follows the `title:`
+  frontmatter** when it used to match the old filename. Matches either
+  the basename (`title: notes` for `notes.md`) or the full filename
+  (`title: notes.md`) and preserves the shape when rewriting. Titles that
+  the user set intentionally (different from the filename) are left
+  alone.
+- `Frontmatter.settingTitle(_:in:)` helper that rewrites the top-level
+  `title:` line (or inserts one when missing). Emits a YAML-safe scalar,
+  double-quoting when the value contains ambiguous characters
+  (`: `, ` #`, leading indicators, quotes, control chars).
+- `DocumentStore.setFrontmatter(_:)` + `frontmatterDirty` so programmatic
+  frontmatter mutations trip the dirty flag / edited title suffix.
+
+### Notes
+- Open-clean tabs are saved immediately after the title update so the
+  disk matches what the sidebar shows.
+- Open-dirty tabs get the frontmatter mutation in memory only; the
+  user's next save carries it to disk along with their edits.
+
 ## [0.4.1] - 2026-08-23
 
 ### Added

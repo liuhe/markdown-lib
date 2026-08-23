@@ -80,7 +80,63 @@ enum Frontmatter {
         return nil
     }
 
+    /// Rewrite the top-level `title:` line inside `frontmatter` to `newTitle`.
+    /// If no `title:` line exists, one is inserted at the very top. Unrelated
+    /// keys, comments, and blank lines are preserved verbatim.
+    ///
+    /// Passing `nil` frontmatter treats it as empty (so this becomes "create
+    /// a frontmatter block with just `title:`").
+    static func settingTitle(_ newTitle: String, in frontmatter: String?) -> String {
+        let value = encodeScalar(newTitle)
+        let source = frontmatter ?? ""
+        var lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var replaced = false
+        for i in lines.indices {
+            let line = lines[i]
+            // Skip indented lines — they belong to a nested map, not our title.
+            guard line.first != " ", line.first != "\t" else { continue }
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            if key == "title" {
+                lines[i] = "title: \(value)"
+                replaced = true
+                break
+            }
+        }
+        if !replaced {
+            // Insert at the top so it's easy to spot.
+            if lines == [""] { lines = ["title: \(value)"] }
+            else { lines.insert("title: \(value)", at: 0) }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Value parsing
+
+    /// Encode a string as a YAML scalar. Uses the plain (unquoted) form when
+    /// the value is unambiguous; falls back to double-quoted with backslash
+    /// escapes otherwise. Conservative — false positives (needless quoting)
+    /// beat false negatives (a broken frontmatter).
+    private static func encodeScalar(_ s: String) -> String {
+        let indicators: Set<Character> = [
+            "-", "?", ":", ",", "[", "]", "{", "}", "#", "&", "*",
+            "!", "|", ">", "'", "\"", "%", "@", "`",
+        ]
+        let firstChar = s.first
+        let needsQuote =
+            s.isEmpty
+            || indicators.contains(firstChar ?? " ")
+            || (firstChar?.isWhitespace ?? false)
+            || (s.last?.isWhitespace ?? false)
+            || s.contains(": ")                 // reads as a nested value otherwise
+            || s.contains(" #")                 // starts an inline comment otherwise
+            || s.contains(where: { $0.isNewline || $0 == "\t" || $0 == "\"" || $0 == "\\" })
+        if !needsQuote { return s }
+        let escaped = s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
 
     /// Strip surrounding quotes and drop trailing YAML comments. Returns nil
     /// for empty values.

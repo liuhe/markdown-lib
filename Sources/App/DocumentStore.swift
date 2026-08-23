@@ -20,9 +20,13 @@ final class DocumentStore: ObservableObject {
     /// Reassembled verbatim on save.
     @Published private(set) var rawFrontmatter: String? = nil
 
-    /// Snapshot of the *body* last read from / written to disk. Dirty tracking
-    /// compares against this, so pure-frontmatter edits don't need special
-    /// casing (we don't currently mutate frontmatter from the app anyway).
+    /// Flipped whenever `setFrontmatter(_:)` mutates `rawFrontmatter` without
+    /// a corresponding save. `write(to:)` and `read(from:)` clear it.
+    @Published private(set) var frontmatterDirty: Bool = false
+
+    /// Snapshot of the *body* last read from / written to disk. Frontmatter
+    /// changes go through `frontmatterDirty` because their diff isn't visible
+    /// to the body-vs-lastSavedText comparison.
     private(set) var lastSavedText: String = ""
 
     /// Modification date of the file as of the last read/write. Used to detect
@@ -38,7 +42,18 @@ final class DocumentStore: ObservableObject {
 
     private var pollTimer: Timer?
 
-    var isDirty: Bool { text != lastSavedText }
+    var isDirty: Bool { text != lastSavedText || frontmatterDirty }
+
+    /// Programmatically replace the raw YAML frontmatter block. Empty strings
+    /// are treated as "no frontmatter". Sets `frontmatterDirty` when the new
+    /// value differs from the current one so the tab title picks up the
+    /// "— Edited" suffix and the close-window prompt fires.
+    func setFrontmatter(_ value: String?) {
+        let normalized: String? = (value?.isEmpty == true) ? nil : value
+        guard normalized != rawFrontmatter else { return }
+        rawFrontmatter = normalized
+        frontmatterDirty = true
+    }
 
     /// Value of the `title:` key from the frontmatter, or nil if none.
     var title: String? {
@@ -64,6 +79,7 @@ final class DocumentStore: ObservableObject {
         rawFrontmatter = fm
         text = body
         lastSavedText = body
+        frontmatterDirty = false
         fileURL = url
         lastKnownModDate = modificationDate(of: url)
         externallyModified = false
@@ -82,6 +98,7 @@ final class DocumentStore: ObservableObject {
         let full = Frontmatter.assemble(frontmatter: rawFrontmatter, body: text)
         try Data(full.utf8).write(to: url, options: .atomic)
         lastSavedText = text
+        frontmatterDirty = false
         fileURL = url
         lastKnownModDate = modificationDate(of: url)
         lastSelfWriteTime = Date()

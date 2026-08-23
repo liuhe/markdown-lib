@@ -437,13 +437,71 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
                                        initial: url.lastPathComponent,
                                        confirm: "Rename") else { return }
         if name == url.lastPathComponent { return }
+        let oldFilename = url.lastPathComponent
+        let oldBasename = url.deletingPathExtension().lastPathComponent
         do {
             let newURL = try workspace.rename(url, to: name)
             tabs.updateAfterRename(from: url, to: newURL)
+            try syncTitleFollowingFilename(from: (oldFilename, oldBasename), to: newURL)
             refreshTitleAndDocProxy()
         } catch {
             appDelegate?.presentError(error)
         }
+    }
+
+    /// If the frontmatter `title:` used to match the old filename or basename,
+    /// rewrite it to match the new one. Users who set an intentional title
+    /// (different from the filename) are left alone.
+    private func syncTitleFollowingFilename(
+        from old: (filename: String, basename: String),
+        to newURL: URL
+    ) throws {
+        guard WorkspaceStore.isEditable(newURL) else { return }
+        let newFilename = newURL.lastPathComponent
+        let newBasename = newURL.deletingPathExtension().lastPathComponent
+
+        // If the file is currently open in a tab, work on the in-memory copy
+        // (avoids racing with the tab's own write path).
+        if let tab = tabs.tabs.first(where: { $0.store.fileURL == newURL }) {
+            guard let fm = tab.store.rawFrontmatter,
+                  let current = Frontmatter.title(in: fm) else { return }
+            guard let newTitle = mappedTitle(current: current, old: old,
+                                             newFilename: newFilename,
+                                             newBasename: newBasename)
+            else { return }
+            let wasClean = !tab.store.isDirty
+            tab.store.setFrontmatter(Frontmatter.settingTitle(newTitle, in: fm))
+            // Clean tab: persist immediately so disk matches sidebar.
+            // Dirty tab: leave the frontmatter dirty flag; user's next save
+            // will carry the title update along with their edits.
+            if wasClean { try tab.store.save() }
+            return
+        }
+
+        // Not open — read, rewrite, write.
+        let data = try Data(contentsOf: newURL)
+        guard let source = String(data: data, encoding: .utf8) else { return }
+        let (fmOpt, body) = Frontmatter.split(source)
+        guard let fm = fmOpt, let current = Frontmatter.title(in: fm) else { return }
+        guard let newTitle = mappedTitle(current: current, old: old,
+                                         newFilename: newFilename,
+                                         newBasename: newBasename)
+        else { return }
+        let updated = Frontmatter.settingTitle(newTitle, in: fm)
+        let full = Frontmatter.assemble(frontmatter: updated, body: body)
+        try Data(full.utf8).write(to: newURL, options: .atomic)
+    }
+
+    private func mappedTitle(current: String,
+                             old: (filename: String, basename: String),
+                             newFilename: String,
+                             newBasename: String) -> String? {
+        // Match basename first so `title: notes` (extension-less) survives a
+        // rename like `notes.md` → `ideas.md` as `title: ideas`, not
+        // `title: ideas.md`.
+        if current == old.basename { return newBasename }
+        if current == old.filename { return newFilename }
+        return nil
     }
 
     func confirmDelete(_ url: URL) {
