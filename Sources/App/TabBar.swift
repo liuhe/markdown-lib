@@ -1,8 +1,9 @@
 import SwiftUI
+import AppKit
 
 /// Horizontal tab strip for a `MarkdownWindowController`. Each tab shows the
 /// document's display name, a dirty-indicator dot, and a close ✕. Click a tab
-/// to activate; click ✕ or middle-click to close.
+/// to activate; click ✕ or middle-click (scroll wheel) to close.
 struct TabBar: View {
     @ObservedObject var tabs: TabbedDocumentModel
     let onCloseTab: (Int) -> Void
@@ -79,5 +80,48 @@ private struct TabItem: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovering = $0 }
+        // Middle-click (scroll-wheel click) closes the tab. SwiftUI's tap
+        // gestures ignore that button, so we drop an NSView on top that
+        // *only* claims hits during `otherMouseDown` with button 2 — every
+        // other click still reaches the SwiftUI content underneath.
+        .overlay(MiddleClickCatcher(onMiddleClick: onClose).allowsHitTesting(true))
+    }
+}
+
+/// Transparent NSView that swallows middle-clicks and delegates every other
+/// mouse event back to whatever's underneath. Trick: `hitTest(_:)` gets
+/// called during event dispatch, so we can inspect `NSApp.currentEvent` and
+/// only claim the hit when it's a middle-click.
+private struct MiddleClickCatcher: NSViewRepresentable {
+    let onMiddleClick: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let v = MiddleClickView()
+        v.onMiddleClick = onMiddleClick
+        return v
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        (view as? MiddleClickView)?.onMiddleClick = onMiddleClick
+    }
+}
+
+private final class MiddleClickView: NSView {
+    var onMiddleClick: (() -> Void)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let event = NSApp.currentEvent else { return nil }
+        switch event.type {
+        case .otherMouseDown, .otherMouseUp:
+            // buttonNumber 2 is the scroll-wheel / middle button; 3+ are
+            // extra mouse buttons we don't want to hijack.
+            return event.buttonNumber == 2 ? self : nil
+        default:
+            return nil
+        }
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        if event.buttonNumber == 2 { onMiddleClick?() }
     }
 }

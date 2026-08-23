@@ -94,5 +94,12 @@ VERSION                          — single source of truth for version stamping
 AppIcon.icns                     — packed icon set
 ```
 
+## Keyboard shortcuts
+
+See [`SHORTCUTS.md`](SHORTCUTS.md) for the full list — file / edit /
+format / view / tab-nav / sidebar / mouse.
+
+## Contributing
+
 See [`CLAUDE.md`](CLAUDE.md) for the internal architecture notes and the
 non-obvious gotchas future contributors (human or AI) should know about.

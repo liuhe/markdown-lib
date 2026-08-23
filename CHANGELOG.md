@@ -6,6 +6,19 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-23
+
+### Added
+- **Middle-click a tab to close it.** Scroll-wheel click on the tab
+  strip works the way it does in every browser. Left / right clicks
+  and drags still reach the underlying SwiftUI tab (implemented via a
+  transparent `MiddleClickCatcher` NSView whose `hitTest` only claims
+  the hit when `NSApp.currentEvent` is an `otherMouseDown` with button
+  number 2).
+- **`SHORTCUTS.md`** at the repo root lists every keyboard shortcut
+  the app accepts, grouped by area (Files / Edit / Format / View /
+  Tabs / Sidebar / Mouse). Linked from the README.
+
 ## [0.11.1] - 2026-08-23
 
 ### Changed
