@@ -52,6 +52,10 @@ struct WorkspaceFilePicker: View {
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
                     .onSubmit(commit)
+                    // Up / Down on the search field move the highlight in
+                    // the result list below without giving up focus.
+                    .onKeyPress(.upArrow)   { moveSelection(-1); return .handled }
+                    .onKeyPress(.downArrow) { moveSelection(1);  return .handled }
                 Button("Cancel") { onCancel() }
                     .keyboardShortcut(.escape, modifiers: [])
             }
@@ -59,27 +63,36 @@ struct WorkspaceFilePicker: View {
 
             Divider()
 
-            List(selection: $selectedID) {
-                ForEach(filtered, id: \.self) { url in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: "doc.text")
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 11))
-                        Text(url.lastPathComponent)
-                            .font(.system(size: 12))
-                        Spacer()
-                        Text(relativeDisplay(url))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.head)
+            ScrollViewReader { scrollProxy in
+                List(selection: $selectedID) {
+                    ForEach(filtered, id: \.self) { url in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "doc.text")
+                                .foregroundStyle(.secondary)
+                                .font(.system(size: 11))
+                            Text(url.lastPathComponent)
+                                .font(.system(size: 12))
+                            Spacer()
+                            Text(relativeDisplay(url))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        }
+                        .tag(url)
+                        .id(url)  // for ScrollViewReader.scrollTo
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) { onPick(url) }
                     }
-                    .tag(url)
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { onPick(url) }
+                }
+                .listStyle(.plain)
+                .onChange(of: selectedID) { _, new in
+                    guard let new else { return }
+                    withAnimation(.none) {
+                        scrollProxy.scrollTo(new, anchor: .center)
+                    }
                 }
             }
-            .listStyle(.plain)
         }
         .frame(minWidth: 520, idealWidth: 560, minHeight: 320, idealHeight: 400)
         .onAppear {
@@ -88,6 +101,21 @@ struct WorkspaceFilePicker: View {
         }
         .onChange(of: query) { _, _ in
             selectedID = filtered.first
+        }
+    }
+
+    /// Move the highlighted row by `delta` (clamped to the visible list).
+    /// Called from the ⬆︎/⬇︎ key handlers on the search field so users can
+    /// navigate without leaving the input.
+    private func moveSelection(_ delta: Int) {
+        let list = filtered
+        guard !list.isEmpty else { return }
+        if let sel = selectedID, let idx = list.firstIndex(of: sel) {
+            let newIdx = max(0, min(list.count - 1, idx + delta))
+            selectedID = list[newIdx]
+        } else {
+            // No selection yet: land on the top row on ↓, bottom on ↑.
+            selectedID = delta >= 0 ? list.first : list.last
         }
     }
 

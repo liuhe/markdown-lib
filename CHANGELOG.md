@@ -6,6 +6,14 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-23
+
+### Fixed
+- **↑/↓ in the ⌘P / ⇧⌘K picker** now move the highlighted result
+  instead of the text cursor inside the search field. Focus stays on
+  the search field so typing continues to filter; a `ScrollViewReader`
+  keeps the highlighted row scrolled into the center of the list.
+
 ## [0.8.0] - 2026-08-23
 
 ### Added
