@@ -6,7 +6,19 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.6.8] - 2026-08-23
+## [0.6.9] - 2026-08-23
+
+### Fixed
+- **App crashed the first time an FSEvent fired** (SIGSEGV in
+  `objc_msgSend` inside the `FileTreeWatcher` callback). Regression
+  from 0.6.6: I read the `pathsPtr` argument as an `NSArray` via
+  `unsafeBitCast`, but the FSEvents stream was created without
+  `kFSEventStreamCreateFlagUseCFTypes`, so `pathsPtr` is a `char**`,
+  not an object. Calling `-objectAtIndexedSubscript:` on random C
+  bytes → dereference of a garbage isa → crash.
+  Fix: add the `UseCFTypes` flag and bridge the `CFArray` properly.
+
+
 
 ### Changed
 - FSEvents debounce bumped 150 ms → 500 ms. With the ignored-subtree

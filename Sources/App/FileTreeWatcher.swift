@@ -42,26 +42,27 @@ final class FileTreeWatcher {
         )
 
         let paths = [url.path] as CFArray
+        // IMPORTANT: kFSEventStreamCreateFlagUseCFTypes makes `eventPaths`
+        // arrive as a `CFArrayRef` of `CFStringRef` instead of the default
+        // `char**`. That's what our callback below assumes; drop the flag
+        // and you'll `objc_msgSend` onto a C string array and crash.
         let flags = UInt32(
             kFSEventStreamCreateFlagFileEvents
             | kFSEventStreamCreateFlagNoDefer
             | kFSEventStreamCreateFlagWatchRoot
             | kFSEventStreamCreateFlagIgnoreSelf
+            | kFSEventStreamCreateFlagUseCFTypes
         )
 
         let callback: FSEventStreamCallback = { _, info, count, pathsPtr, _, _ in
             guard let info else { return }
             let watcher = Unmanaged<FileTreeWatcher>.fromOpaque(info).takeUnretainedValue()
-            // eventPaths is documented as an NSArray of NSString when the
-            // stream was created without kFSEventStreamCreateFlagUseCFTypes —
-            // which is the default. Bridge to Swift.
-            let ns = unsafeBitCast(pathsPtr, to: NSArray.self)
-            var changed: [String] = []
-            changed.reserveCapacity(count)
-            for i in 0..<count {
-                if let s = ns[i] as? String { changed.append(s) }
-            }
-            watcher.trigger(paths: changed)
+            // With UseCFTypes, `pathsPtr` IS a CFArrayRef (not a pointer to
+            // one). Bridge to `[String]` via CFArray → NSArray → cast.
+            let cfArray = Unmanaged<CFArray>.fromOpaque(pathsPtr).takeUnretainedValue()
+            let paths = (cfArray as? [String]) ?? []
+            _ = count  // FSEvents duplicates count in the CFArray length
+            watcher.trigger(paths: paths)
         }
 
         guard let stream = FSEventStreamCreate(

@@ -195,6 +195,15 @@ persist as bogus spans in the exported markdown.
     The watcher must outlive the stream (it does — we own the
     `FSEventStreamRef` and stop it in `stop()` / `deinit`).
 
+16b. **`eventPaths`'s type depends on the create flags.** Without
+    `kFSEventStreamCreateFlagUseCFTypes` it's a `char**` (C string
+    array); with the flag, it's a `CFArrayRef` of `CFStringRef`. We
+    set the flag and bridge via
+    `Unmanaged<CFArray>.fromOpaque(pathsPtr).takeUnretainedValue()
+    as? [String]`. **Don't** treat the raw `pathsPtr` as an `NSArray`
+    without the flag — `objc_msgSend` will crash. This regression cost
+    us a version.
+
 17. **Frontmatter is stored raw and round-tripped verbatim.** The app
     only *reads* one key (`title`) out of it; everything else is opaque
     text. This is deliberate — Obsidian/Zola/tools-of-the-user write
