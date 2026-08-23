@@ -6,6 +6,26 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-23
+
+### Added
+- **⌘+click on inline `code` that looks like a markdown path opens it.**
+  Existing docs often reference sibling files as ``` `../foo.md` ``` or
+  ``` `notes/index.md` ```; those are just inline code on disk (and stay
+  that way — we don't rewrite anything) but are now clickable at view
+  time. JS heuristic: the code text ends in `.md` / `.markdown` /
+  `.mdown` / `.mkd` (with optional `#anchor`). Regular inline code
+  (variable names, commands) is unaffected.
+- Path resolution now tries **two bases in order**: current file's
+  directory (classic markdown), then the workspace root (matches the
+  "root-relative" convention many project notes use). First candidate
+  that exists on disk wins; if none exist, falls back to the classic
+  interpretation so the missing-file alert makes sense. Anchor
+  `[label](href)` links go through the same code path for consistency.
+- `EditorBridge.workspaceRootURL` — populated per tab in
+  `MarkdownWindowController.rebindTabSubscriptions`; used only by the
+  resolver above.
+
 ## [0.12.0] - 2026-08-23
 
 ### Added

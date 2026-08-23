@@ -216,15 +216,46 @@ struct MarkdownWebEditor: NSViewRepresentable {
             return t.value;
           }
 
-          // Cmd+click 链接 → 交给系统浏览器（不让 prosemirror 吃掉）
+          // Cmd+click on a link → open externally / in a tab.
+          // Cmd+click on an inline `code` span whose text looks like a
+          // markdown path (`../foo.md`, `notes/index.md`, `foo.md#anchor`,
+          // …) → same. We DO NOT rewrite the file — the backticks stay in
+          // the markdown on disk. This is purely a navigation aid at
+          // view/edit time.
+          function looksLikeMarkdownPath(text) {
+            if (!text) return false;
+            var t = text.trim();
+            if (!t || t.length > 512) return false;
+            if (t.indexOf('\\n') !== -1) return false;
+            return /\\.(md|markdown|mdown|mkd)(#.*)?$/i.test(t);
+          }
+
           document.addEventListener('click', function (e) {
             if (!e.metaKey) return;
-            var a = e.target && e.target.closest ? e.target.closest('a') : null;
-            if (!a || !a.href) return;
-            e.preventDefault();
-            e.stopPropagation();
-            var url = decodeEntities(a.getAttribute('href') || a.href);
-            window.webkit.messageHandlers.editor.postMessage({ type: 'openLink', url: url });
+            var target = e.target && e.target.closest ? e.target : null;
+            if (!target) return;
+
+            var a = target.closest('a');
+            if (a && a.href) {
+              e.preventDefault();
+              e.stopPropagation();
+              var url = decodeEntities(a.getAttribute('href') || a.href);
+              window.webkit.messageHandlers.editor.postMessage({ type: 'openLink', url: url });
+              return;
+            }
+
+            var code = target.closest('code');
+            if (code) {
+              var text = code.textContent || '';
+              if (looksLikeMarkdownPath(text)) {
+                e.preventDefault();
+                e.stopPropagation();
+                window.webkit.messageHandlers.editor.postMessage({
+                  type: 'openLink',
+                  url: text.trim()
+                });
+              }
+            }
           }, true);
 
           function getAnchorAtCursor() {
@@ -714,17 +745,42 @@ struct MarkdownWebEditor: NSViewRepresentable {
                 return
             }
 
-            // Relative path: resolve against the current document's URL.
-            guard let base = parent.store.fileURL else {
-                // Untitled tab — no anchor to resolve against.
-                NSSound.beep()
+            // Relative path: try resolving against the current file first
+            // (classic markdown), then against the workspace root (so a
+            // backticked `notes/index.md` in the text opens even when the
+            // author wrote it root-relative). We pick the first candidate
+            // that actually exists on disk; if none exist, fall back to the
+            // classic-relative interpretation so the missing-file alert
+            // makes sense.
+            let candidates = candidateFileURLs(for: href)
+            for url in candidates where FileManager.default.fileExists(atPath: url.path) {
+                (NSApp.delegate as? AppDelegate)?.open(url: url)
                 return
             }
-            if let resolved = Self.resolveRelative(href: href, base: base) {
-                (NSApp.delegate as? AppDelegate)?.open(url: resolved)
+            if let first = candidates.first {
+                (NSApp.delegate as? AppDelegate)?.open(url: first)
             } else {
                 NSSound.beep()
             }
+        }
+
+        /// Ordered list of file URLs to try for a relative `href`:
+        ///   1. Resolved against the current document's directory.
+        ///   2. Resolved against the workspace root, when there is one and
+        ///      the href isn't already navigating out (`./`, `../`).
+        private func candidateFileURLs(for href: String) -> [URL] {
+            var out: [URL] = []
+            if let base = parent.store.fileURL,
+               let u = Self.resolveRelative(href: href, base: base) {
+                out.append(u)
+            }
+            if let root = parent.bridge.workspaceRootURL,
+               !href.hasPrefix("./"),
+               !href.hasPrefix("../"),
+               let u = Self.resolveRelativeToRoot(href: href, root: root) {
+                if !out.contains(u) { out.append(u) }
+            }
+            return out
         }
 
         /// Try two strategies: first as a URL-encoded relative reference
@@ -738,6 +794,16 @@ struct MarkdownWebEditor: NSViewRepresentable {
             let baseDir = base.deletingLastPathComponent()
             let decoded = href.removingPercentEncoding ?? href
             return URL(fileURLWithPath: decoded, relativeTo: baseDir)
+                .absoluteURL
+                .standardizedFileURL
+        }
+
+        /// Resolve `href` as a workspace-root-relative path. Strips a
+        /// leading `/` so `/notes/foo.md` and `notes/foo.md` both work.
+        private static func resolveRelativeToRoot(href: String, root: URL) -> URL? {
+            let stripped = href.hasPrefix("/") ? String(href.dropFirst()) : href
+            let decoded = stripped.removingPercentEncoding ?? stripped
+            return URL(fileURLWithPath: decoded, relativeTo: root)
                 .absoluteURL
                 .standardizedFileURL
         }

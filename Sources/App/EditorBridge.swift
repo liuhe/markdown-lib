@@ -11,6 +11,13 @@ final class EditorBridge: ObservableObject {
     weak var webView: WKWebView?
     var isEditorReady: Bool = false
 
+    /// Workspace root URL, populated by `MarkdownWindowController.rebindTabSubscriptions`
+    /// when this tab belongs to a workspace window. Used by the Cmd+click
+    /// resolver as a secondary base — a backticked `notes/index.md` in the
+    /// text can resolve either against the current file's directory or
+    /// against this root, and we try both in that order.
+    var workspaceRootURL: URL?
+
     /// Set by the window controller; fired when the JS side asks for a
     /// workspace-file picker (`⌘⇧K` or the Edit menu item). The payload is
     /// the current selection text, or nil if there was none.

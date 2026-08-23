@@ -93,6 +93,7 @@ keys drive the tree without leaving your query field or editor.
 | Input | Action |
 |---|---|
 | `⌘+click` a link | Open in-app tab (`file://` / relative), or system browser (`http` / `https`) |
+| `⌘+click` inline `` `code` `` that ends in `.md` / `.markdown` / `.mdown` / `.mkd` | Open as a tab (resolved against the current file first, then the workspace root) |
 | Drag `.md` / folder onto editor window | Open it |
 | Drag `.md` / folder onto Dock icon | Open it |
 | Middle-click a tab | Close that tab |

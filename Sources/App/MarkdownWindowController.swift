@@ -111,6 +111,10 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
         tabCancellables.removeAll()
         for tab in tabs.tabs {
             let id = tab.id
+            // Give each tab's bridge a handle on the workspace root so
+            // Cmd+click on a backticked path can try workspace-relative
+            // resolution as a fallback.
+            tab.bridge.workspaceRootURL = workspace?.rootURL
             // Route the JS-side "pick a file to link to" request through here
             // so we can present the picker with the right workspace + tab.
             tab.bridge.onFileLinkPickerRequested = { [weak self, weak tab] selection in
