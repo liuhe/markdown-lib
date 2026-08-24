@@ -6,6 +6,17 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-08-23
+
+### Fixed
+- **Enter in a completed task item created another completed task
+  item.** ProseMirror's default split preserves node attrs on both
+  halves, so `checked=true` bled onto the new row. Added a keydown
+  Enter observer that, after the default split runs, inspects the
+  taskItem now under the caret and — if it's checked — dispatches a
+  `setNodeMarkup` transaction to clear the flag. The original stays
+  ticked; the new row starts unchecked, ready for the next task.
+
 ## [0.13.0] - 2026-08-23
 
 ### Added

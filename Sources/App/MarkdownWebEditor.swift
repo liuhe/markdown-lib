@@ -452,6 +452,37 @@ struct MarkdownWebEditor: NSViewRepresentable {
             } catch (err) {}
           }, true);
 
+          // Enter inside a completed task item: the split preserves attrs on
+          // both halves, so the new item ends up checked too. Reset it —
+          // the caret ends up inside the new item, so we just look at
+          // `checked` under the current selection after the default Enter
+          // handling has run.
+          document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') return;
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+            setTimeout(function () {
+              try {
+                var wwEditor = editor.getCurrentModeEditor();
+                var view = wwEditor && wwEditor.view;
+                if (!view) return;
+                var state = view.state;
+                var taskType = state.schema.nodes.taskItem;
+                if (!taskType) return;
+                var $from = state.selection.$from;
+                var depth = $from.depth;
+                while (depth > 0 && $from.node(depth).type !== taskType) {
+                  depth--;
+                }
+                if (depth <= 0) return;
+                var node = $from.node(depth);
+                if (!node.attrs || !node.attrs.checked) return;
+                var pos = $from.before(depth);
+                var attrs = Object.assign({}, node.attrs, { checked: false });
+                view.dispatch(state.tr.setNodeMarkup(pos, null, attrs));
+              } catch (err) {}
+            }, 0);
+          }, true);
+
           // ---- Search / Replace --------------------------------------------------
 
           var searchState = { query: '', hits: [], current: -1 };
