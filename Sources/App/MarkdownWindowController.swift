@@ -638,6 +638,8 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
             if let primary = renames.first(where: { $0.from == url }) {
                 try syncTitleFollowingFilename(from: (oldFilename, oldBasename),
                                                to: primary.to)
+                try syncCompanionDirReferences(oldBasename: oldBasename,
+                                               newURL: primary.to)
             }
             refreshTitleAndDocProxy()
         } catch {
@@ -686,6 +688,70 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
         let updated = Frontmatter.settingTitle(newTitle, in: fm)
         let full = Frontmatter.assemble(frontmatter: updated, body: body)
         try Data(full.utf8).write(to: newURL, options: .atomic)
+    }
+
+    /// After a `.md` file gets renamed from `<oldBasename>.md` to something
+    /// with `<newURL.basename>`, any `![](oldBasename.assets/…)` or
+    /// `[link](oldBasename/…)` inside the file's body still points at the
+    /// pre-rename names. Rewrite them so the pair stays consistent.
+    /// Same three-branch dance as title-follow: open-clean saves, open-dirty
+    /// stays in-memory, not-open goes through raw file I/O.
+    private func syncCompanionDirReferences(oldBasename: String, newURL: URL) throws {
+        guard WorkspaceStore.isMarkdownFile(newURL) else { return }
+        let newBasename = newURL.deletingPathExtension().lastPathComponent
+        if newBasename == oldBasename { return }
+
+        func rewrite(_ text: String) -> String {
+            Self.rewriteCompanionRefs(in: text,
+                                      oldBasename: oldBasename,
+                                      newBasename: newBasename)
+        }
+
+        if let tab = tabs.tabs.first(where: { $0.store.fileURL == newURL }) {
+            let updated = rewrite(tab.store.text)
+            guard updated != tab.store.text else { return }
+            let wasClean = !tab.store.isDirty
+            tab.store.text = updated
+            if wasClean { try tab.store.save() }
+            return
+        }
+
+        let data = try Data(contentsOf: newURL)
+        guard let source = String(data: data, encoding: .utf8) else { return }
+        let (fm, body) = Frontmatter.split(source)
+        let updated = rewrite(body)
+        guard updated != body else { return }
+        let full = Frontmatter.assemble(frontmatter: fm, body: updated)
+        try Data(full.utf8).write(to: newURL, options: .atomic)
+    }
+
+    /// Substring-rewrite `oldBase.assets/…` and `oldBase/…` when they appear
+    /// inside markdown link/image parentheses. Also covers percent-encoded
+    /// basenames (as written by `⇧⌘K`'s Insert Link to File… and by our
+    /// paste-image path when the basename has spaces / unicode).
+    static func rewriteCompanionRefs(in text: String,
+                                     oldBasename: String,
+                                     newBasename: String) -> String {
+        var pairs: [(String, String)] = []
+        func add(_ from: String, _ to: String) {
+            if from != to && !pairs.contains(where: { $0.0 == from }) {
+                pairs.append((from, to))
+            }
+        }
+        // Raw form.
+        add("(\(oldBasename).assets/", "(\(newBasename).assets/")
+        add("(\(oldBasename)/",        "(\(newBasename)/")
+        // Percent-encoded form (safe/URL-clean basenames encode identically
+        // to their raw form; only distinct when they contain space, etc.).
+        let allowed = CharacterSet.urlPathAllowed
+        let encOld = oldBasename.addingPercentEncoding(withAllowedCharacters: allowed) ?? oldBasename
+        let encNew = newBasename.addingPercentEncoding(withAllowedCharacters: allowed) ?? newBasename
+        add("(\(encOld).assets/", "(\(encNew).assets/")
+        add("(\(encOld)/",        "(\(encNew)/")
+
+        var out = text
+        for (from, to) in pairs { out = out.replacingOccurrences(of: from, with: to) }
+        return out
     }
 
     private func mappedTitle(current: String,

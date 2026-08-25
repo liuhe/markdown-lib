@@ -6,6 +6,25 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-08-23
+
+### Fixed
+- **Rename `X.md` → `Y.md` now rewrites the file's own
+  `(X.assets/…)` and `(X/…)` references** to `(Y.assets/…)` /
+  `(Y/…)`. Without this the sibling dir was renamed on disk (already
+  worked since 0.5.0 / 0.14.0) but every image / sub-page link inside
+  the file itself was left pointing at the gone path, so rename
+  silently broke navigation.
+- Handles both raw basenames and percent-encoded ones (⇧⌘K's Insert
+  Link to File… and our paste-image path emit encoded forms when the
+  basename contains spaces / non-ASCII). Three-branch dance mirrors
+  `syncTitleFollowingFilename`: open-clean saves immediately;
+  open-dirty updates in-memory + lets the user's next save persist;
+  not-open reads / rewrites / writes on disk.
+- Substring scoping is `(…)` — inside markdown link/image parens — so
+  a stray occurrence of the basename word elsewhere in the body isn't
+  touched.
+
 ## [0.14.0] - 2026-08-23
 
 ### Added
