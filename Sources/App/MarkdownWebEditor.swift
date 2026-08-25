@@ -90,8 +90,48 @@ struct MarkdownWebEditor: NSViewRepresentable {
               ['ul', 'ol', 'task'],
               ['table', 'link'],
               ['code', 'codeblock']
-            ]
+            ],
+            // Intercept image drops / pastes: hand the blob to Swift, which
+            // writes it to `<basename>.assets/paste-…` next to the current
+            // file and hands us back a relative-path URL to insert.
+            hooks: {
+              addImageBlobHook: function (blob, callback) {
+                handleImageBlob(blob, callback);
+              }
+            }
           });
+
+          var pendingImagePastes = {};
+          var pastesCounter = 0;
+
+          function handleImageBlob(blob, callback) {
+            if (!blob) { callback('', ''); return; }
+            var reader = new FileReader();
+            reader.onload = function () {
+              var dataUrl = String(reader.result || '');
+              var comma = dataUrl.indexOf(',');
+              if (comma < 0) { callback('', ''); return; }
+              var base64 = dataUrl.substring(comma + 1);
+              var mime = blob.type || 'image/png';
+              var id = 'p' + (++pastesCounter);
+              pendingImagePastes[id] = callback;
+              window.webkit.messageHandlers.editor.postMessage({
+                type: 'pasteImage',
+                id: id,
+                base64: base64,
+                mime: mime
+              });
+            };
+            reader.onerror = function () { callback('', ''); };
+            reader.readAsDataURL(blob);
+          }
+
+          window.mdImagePasteResult = function (id, href, alt) {
+            var cb = pendingImagePastes[id];
+            if (!cb) return;
+            delete pendingImagePastes[id];
+            cb(href || '', alt || '');
+          };
 
           // Kill spellcheck / autocorrect / smart-substitution on every
           // contenteditable ProseMirror creates. WKWebView's spellcheck
@@ -884,6 +924,11 @@ struct MarkdownWebEditor: NSViewRepresentable {
                 DispatchQueue.main.async {
                     bridge.onFileLinkPickerRequested?(selection?.isEmpty == true ? nil : selection)
                 }
+            case "pasteImage":
+                guard let id = dict["id"] as? String,
+                      let base64 = dict["base64"] as? String else { break }
+                let mime = (dict["mime"] as? String) ?? "image/png"
+                DispatchQueue.main.async { self.handleImagePaste(id: id, base64: base64, mime: mime) }
             default: break
             }
         }
@@ -916,6 +961,98 @@ struct MarkdownWebEditor: NSViewRepresentable {
             }
             out += "\""
             return out
+        }
+
+        // MARK: - Paste image
+
+        /// Save a pasted / dropped image blob into the current file's
+        /// `<basename>.assets/` sibling directory, then hand back a
+        /// document-relative URL so Toast UI Editor can insert
+        /// `![](rel/path.ext)` for us.
+        fileprivate func handleImagePaste(id: String, base64: String, mime: String) {
+            guard let sourceURL = parent.store.fileURL else {
+                respondImagePaste(id: id, href: "", alt: "")
+                let alert = NSAlert()
+                alert.messageText = "Save this file first."
+                alert.informativeText = "Pasted images are stored in “<basename>.assets/” next to the markdown file, so this tab needs a saved location before it can accept image drops or pastes."
+                alert.runModal()
+                return
+            }
+            guard let data = Data(base64Encoded: base64), !data.isEmpty else {
+                respondImagePaste(id: id, href: "", alt: "")
+                return
+            }
+            let ext = Self.extensionForMIME(mime)
+            let assetsDir = sourceURL
+                .deletingPathExtension()
+                .appendingPathExtension("assets")
+
+            do {
+                try FileManager.default.createDirectory(
+                    at: assetsDir, withIntermediateDirectories: true
+                )
+            } catch {
+                respondImagePaste(id: id, href: "", alt: "")
+                return
+            }
+
+            let target = Self.uniqueImagePath(inside: assetsDir, ext: ext)
+            do {
+                try data.write(to: target, options: .atomic)
+            } catch {
+                respondImagePaste(id: id, href: "", alt: "")
+                return
+            }
+
+            let href = RelativePath.relative(from: sourceURL, to: target)
+            respondImagePaste(id: id, href: href, alt: "")
+        }
+
+        private func respondImagePaste(id: String, href: String, alt: String) {
+            let js = "window.mdImagePasteResult && window.mdImagePasteResult(\(jsQuote(id)), \(jsQuote(href)), \(jsQuote(alt)));"
+            webView?.evaluateJavaScript(js, completionHandler: nil)
+        }
+
+        /// Pick `paste-yyyymmdd-HHmmss.ext`, incrementing a suffix on
+        /// collision so back-to-back pastes don't overwrite each other.
+        private static func uniqueImagePath(inside dir: URL, ext: String) -> URL {
+            let stamp = timestampBasename()
+            var name = "paste-\(stamp).\(ext)"
+            var url = dir.appendingPathComponent(name)
+            var i = 1
+            while FileManager.default.fileExists(atPath: url.path) {
+                i += 1
+                name = "paste-\(stamp)-\(i).\(ext)"
+                url = dir.appendingPathComponent(name)
+            }
+            return url
+        }
+
+        private static func timestampBasename() -> String {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyyMMdd-HHmmss"
+            return f.string(from: Date())
+        }
+
+        private static func extensionForMIME(_ mime: String) -> String {
+            switch mime.lowercased() {
+            case "image/png": return "png"
+            case "image/jpeg", "image/jpg": return "jpg"
+            case "image/gif": return "gif"
+            case "image/webp": return "webp"
+            case "image/svg+xml": return "svg"
+            case "image/heic": return "heic"
+            case "image/tiff": return "tiff"
+            case "image/bmp": return "bmp"
+            default:
+                if let slash = mime.firstIndex(of: "/") {
+                    let raw = String(mime[mime.index(after: slash)...])
+                        .split(separator: "+").first.map(String.init) ?? ""
+                    return raw.isEmpty ? "png" : raw
+                }
+                return "png"
+            }
         }
     }
 }

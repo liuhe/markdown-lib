@@ -6,6 +6,34 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-23
+
+### Added
+- **Paste (or drop) an image → `<basename>.assets/paste-…`.**
+  Hooked into Toast UI's `addImageBlobHook`; the JS side sends the blob
+  base64-encoded to Swift, which writes it to a sibling `X.assets/`
+  directory (created on demand) next to the current file, then hands
+  back a relative path so the editor inserts `![](rel/path.png)` for
+  you. Filename is `paste-yyyymmdd-HHmmss.<ext>`, with a `-N` counter
+  on collision. MIME → extension mapping covers png / jpg / gif / webp
+  / svg / heic / tiff / bmp; anything else falls through to png.
+  Untitled tabs get a "save this file first" alert (no anchor for
+  the `.assets/` dir).
+- Sidebar / filesystem plumbing that treats `X.assets/` as part of
+  `X.md`:
+  - The `.assets/` dir is **hidden from the sidebar** when the paired
+    markdown file exists (the paste blobs would just be noise there).
+  - **Rename / trash / move** on a markdown file now also handle its
+    `.assets/` sibling so the pair never gets split.
+  - The FSEvents rescan filter treats any `*.assets` component as
+    ignored — paste-image writes don't trigger workspace rescans.
+
+### Known limitation
+- Images may render as broken icons inside the WKWebView because our
+  editor HTML is loaded with `baseURL: nil` (no local-file access).
+  The `.md` on disk is correct — you can preview elsewhere. Follow-up
+  work will wire a proper base URL + file-access permission.
+
 ## [0.13.1] - 2026-08-23
 
 ### Fixed

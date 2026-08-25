@@ -217,6 +217,9 @@ final class WorkspaceStore: ObservableObject {
         // Hidden dir prefixes cover .git / .idea / .venv / .DS_Store and the
         // like, all of which get very chatty during background work.
         if c.hasPrefix(".") { return true }
+        // X.assets/ is hidden from the sidebar and doesn't need rescan
+        // notifications when the editor drops paste-… files into it.
+        if c.hasSuffix(".assets") { return true }
         if Self.ignoredDirectoryNames.contains(c) { return true }
         for p in Self.ignoredDirectoryPrefixes where c.hasPrefix(p) { return true }
         if currentIgnore.matches(name: c) { return true }
@@ -236,6 +239,16 @@ final class WorkspaceStore: ObservableObject {
     /// directory may or may not exist on disk.
     static func companionDirectoryURL(for markdownURL: URL) -> URL {
         markdownURL.deletingPathExtension()
+    }
+
+    /// The paste-image assets directory URL for a markdown file:
+    /// `<basename>.assets` sibling. Purely a naming derivation — the
+    /// directory is created lazily on the first image paste and is hidden
+    /// from the sidebar when the paired markdown file exists.
+    static func assetsDirectoryURL(for markdownURL: URL) -> URL {
+        markdownURL
+            .deletingPathExtension()
+            .appendingPathExtension("assets")
     }
 
     // MARK: - Watching
@@ -357,6 +370,20 @@ final class WorkspaceStore: ObservableObject {
                     } catch { throw FSError.underlying(error) }
                 }
             }
+
+            // Same treatment for the paste-image `X.assets/` sibling.
+            let oldAssets = Self.assetsDirectoryURL(for: url)
+            var assetsIsDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: oldAssets.path, isDirectory: &assetsIsDir),
+               assetsIsDir.boolValue {
+                let newAssets = Self.assetsDirectoryURL(for: target)
+                if !FileManager.default.fileExists(atPath: newAssets.path) {
+                    do {
+                        try FileManager.default.moveItem(at: oldAssets, to: newAssets)
+                        renames.append((oldAssets, newAssets))
+                    } catch { throw FSError.underlying(error) }
+                }
+            }
         }
 
         refresh()
@@ -420,6 +447,20 @@ final class WorkspaceStore: ObservableObject {
                     } catch { throw FSError.underlying(error) }
                 }
             }
+            // Same for the `.assets/` sibling.
+            let oldAssets = Self.assetsDirectoryURL(for: url)
+            var assetsIsDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: oldAssets.path, isDirectory: &assetsIsDir),
+               assetsIsDir.boolValue {
+                let basename = target.deletingPathExtension().lastPathComponent
+                let newAssets = destDir.appendingPathComponent(basename + ".assets")
+                if !FileManager.default.fileExists(atPath: newAssets.path) {
+                    do {
+                        try FileManager.default.moveItem(at: oldAssets, to: newAssets)
+                        renames.append((oldAssets, newAssets))
+                    } catch { throw FSError.underlying(error) }
+                }
+            }
         }
 
         refresh()
@@ -448,6 +489,16 @@ final class WorkspaceStore: ObservableObject {
                 do {
                     try FileManager.default.trashItem(at: companion, resultingItemURL: nil)
                     trashed.append(companion)
+                } catch { throw FSError.underlying(error) }
+            }
+            // Same for the paste-image `.assets/` sibling.
+            let assets = Self.assetsDirectoryURL(for: url)
+            var assetsIsDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: assets.path, isDirectory: &assetsIsDir),
+               assetsIsDir.boolValue {
+                do {
+                    try FileManager.default.trashItem(at: assets, resultingItemURL: nil)
+                    trashed.append(assets)
                 } catch { throw FSError.underlying(error) }
             }
         }
@@ -576,6 +627,19 @@ final class WorkspaceStore: ObservableObject {
             mdAdopters[winnerURL] = dir
         }
 
+        // Assets dirs (`X.assets/`) are hidden from the sidebar entirely
+        // when the paired markdown file (`X.md`, `X.markdown`, …) exists
+        // as a sibling. They hold paste-image blobs that clutter navigation.
+        var hiddenAssetDirs: Set<URL> = []
+        for e in entries where e.isDirectory {
+            let name = e.url.lastPathComponent
+            guard name.hasSuffix(".assets") else { continue }
+            let base = String(name.dropLast(".assets".count))
+            if !base.isEmpty, !(filesByBasename[base] ?? []).isEmpty {
+                hiddenAssetDirs.insert(e.url)
+            }
+        }
+
         // Build children. Skip adopted dirs; upgrade adopter .mds to
         // file-folder nodes that carry the (recursively scanned) dir's
         // children.
@@ -585,6 +649,7 @@ final class WorkspaceStore: ObservableObject {
             let itemIsDir = e.isDirectory
             if itemIsDir {
                 if adoptedDirs.contains(item) { continue }
+                if hiddenAssetDirs.contains(item) { continue }
                 childNodes.append(scan(url: item, ignore: ignore))
             } else if let companion = mdAdopters[item] {
                 let dirNode = scan(url: companion, ignore: ignore)
