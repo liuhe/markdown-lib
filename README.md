@@ -132,6 +132,10 @@ The library exports `MarkdownWebEditor`, `EditorBridge`, `DocumentStore`,
 `RelativePath`, and `PerfLog` — no window / tab / workspace / recents
 code.
 
+For host-app responsibilities, image-paste policy, frontmatter/metadata usage,
+shortcut recommendations, and multi-tab gotchas, see
+[`INTEGRATING_MARKDOWNEDITOR.md`](INTEGRATING_MARKDOWNEDITOR.md).
+
 ## Keyboard shortcuts
 
 See [`SHORTCUTS.md`](SHORTCUTS.md) for the full list — file / edit /
