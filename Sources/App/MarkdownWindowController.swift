@@ -1,4 +1,5 @@
 import AppKit
+import MarkdownEditor
 import SwiftUI
 import Combine
 import UniformTypeIdentifiers
@@ -120,6 +121,26 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
             tab.bridge.onFileLinkPickerRequested = { [weak self, weak tab] selection in
                 guard let self, let tab else { return }
                 self.presentFileLinkPicker(for: tab, defaultLabel: selection)
+            }
+            // Route the editor's resolved links (⌘+click on anchors,
+            // backticked paths) through the app's file/folder open path.
+            tab.bridge.onOpenLink = { [weak self] url in
+                guard let self else { return }
+                if url.isFileURL {
+                    self.appDelegate?.open(url: url)
+                } else {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            // Same for drops onto the editor's WKWebView.
+            tab.bridge.onDropURL = { [weak self] url in
+                self?.appDelegate?.open(url: url)
+            }
+            // Save pasted image blobs to `<basename>.assets/paste-…` next to
+            // the current file — Typora's convention. The library will
+            // relativize the returned URL against the source file for us.
+            tab.bridge.onPasteImage = { [weak tab] data, mime in
+                Self.saveImagePaste(data: data, mime: mime, tab: tab)
             }
             tab.store.$text
                 .receive(on: RunLoop.main)
@@ -453,6 +474,51 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
     /// the picker gets the current selection as the default label.
     @objc func insertLinkToFile(_ sender: Any?) {
         tabs.activeTab?.bridge.requestFileLinkPicker()
+    }
+
+    // MARK: - Paste image (Typora `<basename>.assets/` convention)
+
+    /// Save an image blob next to the current file inside
+    /// `<basename>.assets/paste-yyyymmdd-HHmmss.ext`, appending `-N` on
+    /// collision. Returns the on-disk URL; the library relativizes it
+    /// against the tab's fileURL before handing back to Toast UI.
+    /// Untitled tabs get a "save this file first" alert.
+    static func saveImagePaste(data: Data, mime: String, tab: DocumentTab?) -> URL? {
+        guard let sourceURL = tab?.store.fileURL else {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Save this file first."
+                alert.informativeText = "Pasted images are stored in “<basename>.assets/” next to the markdown file, so this tab needs a saved location before it can accept image drops or pastes."
+                alert.runModal()
+            }
+            return nil
+        }
+        let assetsDir = sourceURL.deletingPathExtension().appendingPathExtension("assets")
+        do {
+            try FileManager.default.createDirectory(at: assetsDir, withIntermediateDirectories: true)
+        } catch { return nil }
+
+        let ext = MarkdownWebEditor.extensionForMIME(mime)
+        let stamp = imagePasteStamp()
+        var name = "paste-\(stamp).\(ext)"
+        var target = assetsDir.appendingPathComponent(name)
+        var i = 1
+        while FileManager.default.fileExists(atPath: target.path) {
+            i += 1
+            name = "paste-\(stamp)-\(i).\(ext)"
+            target = assetsDir.appendingPathComponent(name)
+        }
+        do {
+            try data.write(to: target, options: .atomic)
+        } catch { return nil }
+        return target
+    }
+
+    private static func imagePasteStamp() -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        return f.string(from: Date())
     }
 
     // MARK: - Format menu actions

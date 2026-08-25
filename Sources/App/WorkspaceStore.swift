@@ -1,4 +1,5 @@
 import Foundation
+import MarkdownEditor
 import AppKit
 import Combine
 import Darwin

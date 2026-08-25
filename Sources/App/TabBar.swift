@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownEditor
 import AppKit
 
 /// Horizontal tab strip for a `MarkdownWindowController`. Each tab shows the

@@ -94,6 +94,44 @@ VERSION                          — single source of truth for version stamping
 AppIcon.icns                     — packed icon set
 ```
 
+## Using as a library
+
+Just want the editor for your own app? Depend on the `MarkdownEditor`
+product:
+
+```swift
+.package(url: "https://github.com/liuhe/markdown-lib.git", from: "0.15.0")
+// then
+.product(name: "MarkdownEditor", package: "markdown-lib")
+```
+
+Minimal host code:
+
+```swift
+import SwiftUI
+import MarkdownEditor
+
+struct MyEditor: View {
+    @StateObject private var store = DocumentStore()
+    @StateObject private var bridge = EditorBridge()
+
+    var body: some View {
+        MarkdownWebEditor(store: store, bridge: bridge)
+            .onAppear {
+                bridge.onOpenLink   = { url in NSWorkspace.shared.open(url) }
+                bridge.onPasteImage = { data, mime in
+                    // save `data` somewhere, return the on-disk URL
+                }
+            }
+    }
+}
+```
+
+The library exports `MarkdownWebEditor`, `EditorBridge`, `DocumentStore`,
+`Frontmatter`, `MarkdownOutline` / `OutlineView`, `FindBar`,
+`RelativePath`, and `PerfLog` — no window / tab / workspace / recents
+code.
+
 ## Keyboard shortcuts
 
 See [`SHORTCUTS.md`](SHORTCUTS.md) for the full list — file / edit /

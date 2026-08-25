@@ -1,13 +1,15 @@
 import SwiftUI
 
-struct FindBar: View {
-    @ObservedObject var bridge: EditorBridge
+public struct FindBar: View {
+    @ObservedObject public var bridge: EditorBridge
 
     /// Focus routing for the two text fields.
     private enum Field: Hashable { case find, replace }
     @FocusState private var focused: Field?
 
-    var body: some View {
+    public init(bridge: EditorBridge) { self.bridge = bridge }
+
+    public var body: some View {
         HStack(spacing: 8) {
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass")

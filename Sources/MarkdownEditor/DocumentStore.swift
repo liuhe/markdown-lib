@@ -9,25 +9,27 @@ import Combine
 /// stripped on read and stored separately in `rawFrontmatter` so it survives
 /// a save without the app having to understand its schema. Only known keys
 /// (currently just `title`) are surfaced as computed properties.
-final class DocumentStore: ObservableObject {
+public final class DocumentStore: ObservableObject {
 
-    @Published var text: String = ""
-    @Published private(set) var fileURL: URL? = nil
-    @Published private(set) var externallyModified: Bool = false
+    public init() {}
+
+    @Published public var text: String = ""
+    @Published public private(set) var fileURL: URL? = nil
+    @Published public private(set) var externallyModified: Bool = false
 
     /// Raw YAML content between the leading `---` and closing `---`, exactly
     /// as it was on disk. `nil` when the file has no frontmatter block.
     /// Reassembled verbatim on save.
-    @Published private(set) var rawFrontmatter: String? = nil
+    @Published public private(set) var rawFrontmatter: String? = nil
 
     /// Flipped whenever `setFrontmatter(_:)` mutates `rawFrontmatter` without
     /// a corresponding save. `write(to:)` and `read(from:)` clear it.
-    @Published private(set) var frontmatterDirty: Bool = false
+    @Published public private(set) var frontmatterDirty: Bool = false
 
     /// Snapshot of the *body* last read from / written to disk. Frontmatter
     /// changes go through `frontmatterDirty` because their diff isn't visible
     /// to the body-vs-lastSavedText comparison.
-    private(set) var lastSavedText: String = ""
+    public private(set) var lastSavedText: String = ""
 
     /// Modification date of the file as of the last read/write. Used to detect
     /// external edits without re-reading the whole file.
@@ -42,13 +44,13 @@ final class DocumentStore: ObservableObject {
 
     private var pollTimer: Timer?
 
-    var isDirty: Bool { text != lastSavedText || frontmatterDirty }
+    public var isDirty: Bool { text != lastSavedText || frontmatterDirty }
 
     /// Programmatically replace the raw YAML frontmatter block. Empty strings
     /// are treated as "no frontmatter". Sets `frontmatterDirty` when the new
     /// value differs from the current one so the tab title picks up the
     /// "— Edited" suffix and the close-window prompt fires.
-    func setFrontmatter(_ value: String?) {
+    public func setFrontmatter(_ value: String?) {
         let normalized: String? = (value?.isEmpty == true) ? nil : value
         guard normalized != rawFrontmatter else { return }
         rawFrontmatter = normalized
@@ -56,21 +58,21 @@ final class DocumentStore: ObservableObject {
     }
 
     /// Value of the `title:` key from the frontmatter, or nil if none.
-    var title: String? {
+    public var title: String? {
         guard let fm = rawFrontmatter else { return nil }
         return Frontmatter.title(in: fm)
     }
 
     /// Prefer the frontmatter title, then the filename, then "Untitled".
     /// Drives tab labels + window title.
-    var displayName: String {
+    public var displayName: String {
         if let t = title, !t.isEmpty { return t }
         return fileURL?.lastPathComponent ?? "Untitled"
     }
 
     // MARK: - Disk I/O
 
-    func read(from url: URL) throws {
+    public func read(from url: URL) throws {
         try PerfLog.measure("DocumentStore.read(\(url.lastPathComponent))") {
             let data = try Data(contentsOf: url)
             guard let s = String(data: data, encoding: .utf8) else {
@@ -89,12 +91,12 @@ final class DocumentStore: ObservableObject {
     }
 
     /// Reloads from `fileURL`, discarding any in-memory changes.
-    func revertFromDisk() {
+    public func revertFromDisk() {
         guard let url = fileURL else { return }
         do { try read(from: url) } catch { /* ignore */ }
     }
 
-    func write(to url: URL) throws {
+    public func write(to url: URL) throws {
         try PerfLog.measure("DocumentStore.write(\(url.lastPathComponent))") {
             // Suspend the timer so our own write doesn't look like an external edit.
             stopPolling()
@@ -110,7 +112,7 @@ final class DocumentStore: ObservableObject {
         }
     }
 
-    func save() throws {
+    public func save() throws {
         guard let url = fileURL else { return }
         try write(to: url)
     }
@@ -119,7 +121,7 @@ final class DocumentStore: ObservableObject {
     /// external rename that we performed ourselves via `WorkspaceStore`.
     /// Disk contents didn't change, so `text` / `lastSavedText` stay put; we
     /// just re-baseline the modification date.
-    func retarget(to url: URL) {
+    public func retarget(to url: URL) {
         stopPolling()
         fileURL = url
         lastKnownModDate = modificationDate(of: url)
@@ -131,7 +133,7 @@ final class DocumentStore: ObservableObject {
     /// Called when the on-disk file backing this store has been deleted. We
     /// clear the URL so the store looks "untitled", which forces a Save As
     /// on the next save. Dirty state is preserved.
-    func detachFromDisk() {
+    public func detachFromDisk() {
         stopPolling()
         fileURL = nil
         lastKnownModDate = nil
@@ -175,7 +177,7 @@ final class DocumentStore: ObservableObject {
     }
 
     /// Acknowledge the external change without reloading — clears the flag.
-    func dismissExternalModification() {
+    public func dismissExternalModification() {
         externallyModified = false
     }
 

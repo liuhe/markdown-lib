@@ -1,6 +1,6 @@
 import Foundation
 
-enum RelativePath {
+public enum RelativePath {
 
     /// Return `target`'s path relative to the directory containing `source`.
     /// Each component is percent-encoded so the result is safe to drop into
@@ -12,7 +12,7 @@ enum RelativePath {
     ///   source = /notes/sub/c.md,      target = /notes/a.md          → "../a.md"
     ///   source = /notes/x/y/z.md,      target = /notes/a.md          → "../../a.md"
     ///   source = /notes/a.md,          target = /notes/w space.md    → "w%20space.md"
-    static func relative(from source: URL, to target: URL) -> String {
+    public static func relative(from source: URL, to target: URL) -> String {
         let fromComponents = source.standardizedFileURL
             .deletingLastPathComponent()
             .pathComponents

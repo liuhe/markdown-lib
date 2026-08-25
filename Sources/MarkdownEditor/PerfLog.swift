@@ -12,21 +12,21 @@ import Foundation
 ///                                last activity marker for context.
 ///
 /// Enabled by default. Disable at launch with `MDLIB_PERF=0`.
-enum PerfLog {
+public enum PerfLog {
 
     /// Blocks that take longer than this print a ⚠️ line to stderr.
-    static var slowBlockThreshold: TimeInterval = 0.050
+    public static var slowBlockThreshold: TimeInterval = 0.050
     /// Main-thread gaps longer than this print a 🚨 line.
-    static var mainStallThreshold: TimeInterval = 0.150
+    public static var mainStallThreshold: TimeInterval = 0.150
 
-    static let enabled: Bool = {
+    public static let enabled: Bool = {
         ProcessInfo.processInfo.environment["MDLIB_PERF"] != "0"
     }()
 
     /// Called once from `MainThreadStallMonitor.start()`. Kills any stdio
     /// buffering on `stderr` so log bursts you see in the terminal reflect
     /// real event bursts, not a batched flush.
-    static func configureStdio() {
+    public static func configureStdio() {
         setvbuf(stderr, nil, _IONBF, 0)
     }
 
@@ -41,7 +41,7 @@ enum PerfLog {
 
     @discardableResult
     @inline(__always)
-    static func measure<T>(_ label: @autoclosure () -> String, _ block: () throws -> T) rethrows -> T {
+    public static func measure<T>(_ label: @autoclosure () -> String, _ block: () throws -> T) rethrows -> T {
         guard enabled else { return try block() }
         let name = label()
         MainThreadStallMonitor.shared.markActivity(name)
@@ -58,19 +58,19 @@ enum PerfLog {
     /// Non-timing activity marker — records "this is what we're doing" so
     /// stall reports can name the last thing that was running on main.
     @inline(__always)
-    static func mark(_ label: @autoclosure () -> String) {
+    public static func mark(_ label: @autoclosure () -> String) {
         guard enabled else { return }
         MainThreadStallMonitor.shared.markActivity(label())
     }
 
     // MARK: - Write
 
-    static func write(_ line: String) {
+    public static func write(_ line: String) {
         let ts = timeFormatter.string(from: Date())
         fputs("[mdlib \(ts)] \(line)\n", stderr)
     }
 
-    static func ms(_ t: TimeInterval) -> String {
+    public static func ms(_ t: TimeInterval) -> String {
         String(format: "%.0f", t * 1000)
     }
 }
@@ -79,9 +79,9 @@ enum PerfLog {
 /// block from a background queue and timing how long it sits in the queue
 /// before running. Zero main-thread wake-ups when the app is idle — the only
 /// cost is a `DispatchSemaphore.wait` on our own utility thread.
-final class MainThreadStallMonitor {
+public final class MainThreadStallMonitor {
 
-    static let shared = MainThreadStallMonitor()
+    public static let shared = MainThreadStallMonitor()
 
     private let lock = NSLock()
     private var lastActivity = "idle"
@@ -92,13 +92,13 @@ final class MainThreadStallMonitor {
     /// How often the probe runs when main is responsive.
     private let probeInterval: TimeInterval = 0.2
 
-    func markActivity(_ activity: String) {
+    public func markActivity(_ activity: String) {
         lock.lock()
         lastActivity = activity
         lock.unlock()
     }
 
-    func start() {
+    public func start() {
         guard PerfLog.enabled else { return }
         guard !running else { return }
         running = true

@@ -6,6 +6,48 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-23
+
+### Changed
+- **Package split into a reusable library + an executable.** Other apps
+  can now `dependencies: [.package(url: "…markdown-lib")]` and
+  `.product(name: "MarkdownEditor", package: "markdown-lib")` to get
+  just the editor part — no windows / tabs / workspace / recents.
+
+### Added
+- `MarkdownEditor` library product. Contents:
+  - `MarkdownWebEditor` — the `NSViewRepresentable` editor
+  - `EditorBridge` — imperative surface + `@Published` search state,
+    plus `onOpenLink` / `onDropURL` / `onPasteImage` /
+    `onFileLinkPickerRequested` hooks hosts wire up
+  - `DocumentStore` — observable text / URL / dirty / external-mod
+    polling, YAML frontmatter aware
+  - `Frontmatter` — split / assemble / title / settingTitle helpers
+  - `MarkdownOutline` + `OutlineEntry` — line-based ATX heading parser
+  - `OutlineView` — right-side outline sidebar (SwiftUI)
+  - `FindBar` — Find & Replace bar (SwiftUI)
+  - `RelativePath` — `relative(from:to:)` helper
+  - `PerfLog` + `MainThreadStallMonitor` — the debugging harness
+  - Toast UI Editor JS/CSS bundled as SPM resources
+- The `markdown-lib` executable now depends on `MarkdownEditor`.
+  App-only pieces (`MarkdownWindowController`, `MarkdownWindowView`,
+  `TabBar`, `TabbedDocumentModel`, `WorkspaceStore`, `FileTreeView`,
+  `FileTreeWatcher`, `FileLinkPicker`, `RecentsStore`, `AppDelegate`,
+  `main.swift`) stay in `Sources/App`.
+
+### Decoupled
+- `MarkdownWebEditor` no longer reaches into `NSApp.delegate as?
+  AppDelegate` for link routing, drop handling, or image pastes. The
+  Coordinator resolves the URL / stages the image blob and forwards
+  through `bridge.onOpenLink` / `bridge.onDropURL` /
+  `bridge.onPasteImage`. Hosts without callbacks get sensible defaults
+  (`NSWorkspace` for external URLs, silent no-op for file URLs, paste
+  rejected).
+- Image-paste file-naming and `<basename>.assets/` policy moved to the
+  host (`MarkdownWindowController.saveImagePaste`) since it's opinionated;
+  library exposes `MarkdownWebEditor.extensionForMIME(_:)` as a small
+  helper.
+
 ## [0.14.1] - 2026-08-23
 
 ### Fixed

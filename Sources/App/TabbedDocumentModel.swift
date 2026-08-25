@@ -1,4 +1,5 @@
 import Foundation
+import MarkdownEditor
 import Combine
 
 /// One editable document that lives inside a `MarkdownWindowController`'s tab

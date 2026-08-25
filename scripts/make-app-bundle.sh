@@ -36,7 +36,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/markdown-lib"
 
 # Copy the SwiftPM-generated resource bundle next to the binary so Bundle.module resolves at runtime.
-BUNDLE_NAME="markdown-lib_markdown-lib.bundle"
+BUNDLE_NAME="markdown-lib_MarkdownEditor.bundle"
 BUNDLE_SRC="$(dirname "$BIN")/${BUNDLE_NAME}"
 if [ -d "$BUNDLE_SRC" ]; then
     cp -R "$BUNDLE_SRC" "$APP/Contents/MacOS/"

@@ -16,6 +16,26 @@ compile check.
 
 Regenerate the icon: `swift scripts/make-icon.swift`.
 
+## Package layout
+
+Two SPM products in one package:
+
+- **`MarkdownEditor`** (library, `Sources/MarkdownEditor/`) — the reusable
+  editor. Other apps can depend on it directly. It never reaches into
+  `NSApp.delegate` or anything app-specific; every side-effect flows
+  through `bridge.onOpenLink` / `onDropURL` / `onPasteImage` /
+  `onFileLinkPickerRequested`.
+- **`markdown-lib`** (executable, `Sources/App/`) — the full app.
+  Depends on `MarkdownEditor` and adds the workspace / tabs / windows
+  / recents machinery. `AppDelegate`, `MarkdownWindowController`,
+  `MarkdownWindowView`, `TabBar`, `TabbedDocumentModel`,
+  `WorkspaceStore`, `FileTreeView`, `FileTreeWatcher`, `FileLinkPicker`,
+  `RecentsStore`, `main.swift` all live here.
+
+The build script's SwiftPM resource-bundle name is
+`markdown-lib_MarkdownEditor.bundle` (was `..._markdown-lib.bundle`
+before the split).
+
 ## Module map
 
 | File | Responsibility |

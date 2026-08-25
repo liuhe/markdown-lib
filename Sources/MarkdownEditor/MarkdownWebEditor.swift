@@ -2,33 +2,41 @@ import SwiftUI
 import WebKit
 import AppKit
 
-/// WKWebView + Toast UI Editor 的 WYSIWYG markdown 编辑器。
-/// 存储层还是 markdown 文本；WKWebView 侧持有富文本编辑体验。
-/// 把 CSS/JS 直接内联进 HTML 再 loadHTMLString，避免 file:// 的 CORS 限制。
-struct MarkdownWebEditor: NSViewRepresentable {
-    @ObservedObject var store: DocumentStore
-    let bridge: EditorBridge
-    /// Called whenever this editor's WKWebView becomes the first responder
-    /// (or the tab is otherwise reactivated). Lets the window controller
-    /// point the shared search infrastructure at this tab's bridge.
-    var onActivate: (() -> Void)?
+/// WKWebView + Toast UI Editor WYSIWYG markdown editor.
+///
+/// The underlying storage stays as markdown text; the WKWebView provides
+/// the rich-text editing surface. CSS/JS are inlined into the HTML and
+/// handed to `loadHTMLString` so we sidestep `file://` CORS.
+///
+/// Host apps get callbacks via `bridge.onOpenLink` / `onDropURL` /
+/// `onPasteImage`; the editor never reaches into `NSApp.delegate` or
+/// anywhere else app-specific.
+public struct MarkdownWebEditor: NSViewRepresentable {
+    @ObservedObject public var store: DocumentStore
+    public let bridge: EditorBridge
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    public init(store: DocumentStore, bridge: EditorBridge) {
+        self.store = store
+        self.bridge = bridge
+    }
 
-    func makeNSView(context: Context) -> WKWebView {
+    public func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    public func makeNSView(context: Context) -> WKWebView {
         let controller = WKUserContentController()
         controller.add(context.coordinator, name: "editor")
 
         let config = WKWebViewConfiguration()
         config.userContentController = controller
-        // 右键 → Inspect Element / Cmd+Alt+I 打开 Web Inspector
+        // Right-click → Inspect Element / Cmd+Alt+I opens the Web Inspector.
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
         let webView = DropForwardingWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
         webView.navigationDelegate = context.coordinator
-        webView.dropHandler = { url in
-            (NSApp.delegate as? AppDelegate)?.open(url: url)
+        let bridge = self.bridge
+        webView.dropHandler = { [weak bridge] url in
+            bridge?.onDropURL?(url)
         }
         context.coordinator.webView = webView
         bridge.webView = webView
@@ -37,7 +45,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
         return webView
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {
+    public func updateNSView(_ webView: WKWebView, context: Context) {
         // Keep the bridge pointing at the tab's own web view — SwiftUI may
         // reuse this representable across renders and we want subsequent
         // search calls routed to the correct WKWebView.
@@ -762,7 +770,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
 
     // MARK: - Coordinator
 
-    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+    public final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var parent: MarkdownWebEditor
         weak var webView: WKWebView?
         var ready = false
@@ -771,10 +779,11 @@ struct MarkdownWebEditor: NSViewRepresentable {
 
         init(_ parent: MarkdownWebEditor) { self.parent = parent }
 
-        // 拦截所有导航：允许初始 about: 加载；其它 URL（http/https/file）交给系统浏览器
-        func webView(_ webView: WKWebView,
-                     decidePolicyFor navigationAction: WKNavigationAction,
-                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // Intercept every navigation: allow the initial `about:` load; any
+        // other URL (http/https/file) routes through `openLinkedHref`.
+        public func webView(_ webView: WKWebView,
+                            decidePolicyFor navigationAction: WKNavigationAction,
+                            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let url = navigationAction.request.url else {
                 decisionHandler(.allow)
                 return
@@ -793,9 +802,11 @@ struct MarkdownWebEditor: NSViewRepresentable {
         }
 
         /// Resolve a link `href` (as delivered by the JS side) into an
-        /// absolute URL and route it appropriately. `file://` targets open
-        /// as new tabs (or reuse existing ones) via `AppDelegate`; anything
-        /// else goes to `NSWorkspace`.
+        /// absolute URL and hand it to `bridge.onOpenLink` when the host
+        /// wired one up. Falls back to `NSWorkspace` for non-`file://`
+        /// URLs when the host didn't supply a handler; `file://` URLs are
+        /// dropped in that case (the host is expected to know what to do
+        /// with them — e.g., open as a tab).
         ///
         /// Handles both percent-encoded relative paths (`../ideas%20.md`)
         /// and raw ones (`../ideas .md`), falling back through both parsing
@@ -808,11 +819,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
 
             // Absolute URL with a scheme: dispatch by scheme.
             if let url = URL(string: href), let scheme = url.scheme, !scheme.isEmpty {
-                if url.isFileURL {
-                    (NSApp.delegate as? AppDelegate)?.open(url: url.standardizedFileURL)
-                } else {
-                    NSWorkspace.shared.open(url)
-                }
+                deliverLink(url)
                 return
             }
 
@@ -821,18 +828,30 @@ struct MarkdownWebEditor: NSViewRepresentable {
             // backticked `notes/index.md` in the text opens even when the
             // author wrote it root-relative). We pick the first candidate
             // that actually exists on disk; if none exist, fall back to the
-            // classic-relative interpretation so the missing-file alert
-            // makes sense.
+            // classic-relative interpretation so the host's missing-file
+            // alert (if any) makes sense.
             let candidates = candidateFileURLs(for: href)
             for url in candidates where FileManager.default.fileExists(atPath: url.path) {
-                (NSApp.delegate as? AppDelegate)?.open(url: url)
+                deliverLink(url)
                 return
             }
             if let first = candidates.first {
-                (NSApp.delegate as? AppDelegate)?.open(url: first)
+                deliverLink(first)
             } else {
                 NSSound.beep()
             }
+        }
+
+        /// Hand `url` off to the host, or fall back to `NSWorkspace` for
+        /// non-file URLs when the host didn't set a handler.
+        private func deliverLink(_ url: URL) {
+            if let handler = parent.bridge.onOpenLink {
+                handler(url.isFileURL ? url.standardizedFileURL : url)
+            } else if !url.isFileURL {
+                NSWorkspace.shared.open(url)
+            }
+            // No fallback for file URLs — a host without a handler has no
+            // opinion on tab routing, so we just do nothing.
         }
 
         /// Ordered list of file URLs to try for a relative `href`:
@@ -888,7 +907,7 @@ struct MarkdownWebEditor: NSViewRepresentable {
              .replacingOccurrences(of: "&#x27;", with: "'")
         }
 
-        func userContentController(_ userContentController: WKUserContentController,
+        public func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
             guard let dict = message.body as? [String: Any],
                   let type = dict["type"] as? String else { return }
@@ -965,46 +984,34 @@ struct MarkdownWebEditor: NSViewRepresentable {
 
         // MARK: - Paste image
 
-        /// Save a pasted / dropped image blob into the current file's
-        /// `<basename>.assets/` sibling directory, then hand back a
-        /// document-relative URL so Toast UI Editor can insert
-        /// `![](rel/path.ext)` for us.
+        /// Route a pasted / dropped image blob through
+        /// `bridge.onPasteImage` (host decides where to save it), then hand
+        /// back a document-relative URL so Toast UI Editor can insert
+        /// `![](rel/path.ext)`. When there's no host handler, the paste is
+        /// rejected — the library itself has no opinion on where images
+        /// belong.
         fileprivate func handleImagePaste(id: String, base64: String, mime: String) {
-            guard let sourceURL = parent.store.fileURL else {
-                respondImagePaste(id: id, href: "", alt: "")
-                let alert = NSAlert()
-                alert.messageText = "Save this file first."
-                alert.informativeText = "Pasted images are stored in “<basename>.assets/” next to the markdown file, so this tab needs a saved location before it can accept image drops or pastes."
-                alert.runModal()
-                return
-            }
             guard let data = Data(base64Encoded: base64), !data.isEmpty else {
                 respondImagePaste(id: id, href: "", alt: "")
                 return
             }
-            let ext = Self.extensionForMIME(mime)
-            let assetsDir = sourceURL
-                .deletingPathExtension()
-                .appendingPathExtension("assets")
-
-            do {
-                try FileManager.default.createDirectory(
-                    at: assetsDir, withIntermediateDirectories: true
-                )
-            } catch {
+            guard let handler = parent.bridge.onPasteImage else {
                 respondImagePaste(id: id, href: "", alt: "")
                 return
             }
-
-            let target = Self.uniqueImagePath(inside: assetsDir, ext: ext)
-            do {
-                try data.write(to: target, options: .atomic)
-            } catch {
+            guard let savedURL = handler(data, mime) else {
                 respondImagePaste(id: id, href: "", alt: "")
                 return
             }
-
-            let href = RelativePath.relative(from: sourceURL, to: target)
+            // Relativize against the current file when we have one, so the
+            // markdown source stays portable. Untitled tab → best we can do
+            // is a `file://` absolute link.
+            let href: String
+            if let sourceURL = parent.store.fileURL {
+                href = RelativePath.relative(from: sourceURL, to: savedURL)
+            } else {
+                href = savedURL.absoluteString
+            }
             respondImagePaste(id: id, href: href, alt: "")
         }
 
@@ -1013,46 +1020,28 @@ struct MarkdownWebEditor: NSViewRepresentable {
             webView?.evaluateJavaScript(js, completionHandler: nil)
         }
 
-        /// Pick `paste-yyyymmdd-HHmmss.ext`, incrementing a suffix on
-        /// collision so back-to-back pastes don't overwrite each other.
-        private static func uniqueImagePath(inside dir: URL, ext: String) -> URL {
-            let stamp = timestampBasename()
-            var name = "paste-\(stamp).\(ext)"
-            var url = dir.appendingPathComponent(name)
-            var i = 1
-            while FileManager.default.fileExists(atPath: url.path) {
-                i += 1
-                name = "paste-\(stamp)-\(i).\(ext)"
-                url = dir.appendingPathComponent(name)
-            }
-            return url
-        }
+    }
 
-        private static func timestampBasename() -> String {
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.dateFormat = "yyyyMMdd-HHmmss"
-            return f.string(from: Date())
-        }
-
-        private static func extensionForMIME(_ mime: String) -> String {
-            switch mime.lowercased() {
-            case "image/png": return "png"
-            case "image/jpeg", "image/jpg": return "jpg"
-            case "image/gif": return "gif"
-            case "image/webp": return "webp"
-            case "image/svg+xml": return "svg"
-            case "image/heic": return "heic"
-            case "image/tiff": return "tiff"
-            case "image/bmp": return "bmp"
-            default:
-                if let slash = mime.firstIndex(of: "/") {
-                    let raw = String(mime[mime.index(after: slash)...])
-                        .split(separator: "+").first.map(String.init) ?? ""
-                    return raw.isEmpty ? "png" : raw
-                }
-                return "png"
+    /// Best-effort map from an image MIME type to a filename extension.
+    /// Exposed publicly so a host's `bridge.onPasteImage` closure can pick
+    /// a sane extension without reimplementing the table.
+    public static func extensionForMIME(_ mime: String) -> String {
+        switch mime.lowercased() {
+        case "image/png": return "png"
+        case "image/jpeg", "image/jpg": return "jpg"
+        case "image/gif": return "gif"
+        case "image/webp": return "webp"
+        case "image/svg+xml": return "svg"
+        case "image/heic": return "heic"
+        case "image/tiff": return "tiff"
+        case "image/bmp": return "bmp"
+        default:
+            if let slash = mime.firstIndex(of: "/") {
+                let raw = String(mime[mime.index(after: slash)...])
+                    .split(separator: "+").first.map(String.init) ?? ""
+                return raw.isEmpty ? "png" : raw
             }
+            return "png"
         }
     }
 }

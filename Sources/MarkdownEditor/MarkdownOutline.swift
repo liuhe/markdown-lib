@@ -6,11 +6,16 @@ import Foundation
 /// same document. The JS side uses it to look up the corresponding `<h1>`…
 /// `<h6>` DOM node and scroll it into view — matching by index is stable
 /// even when heading text repeats.
-struct OutlineEntry: Identifiable, Hashable {
-    let level: Int          // 1…6
-    let text: String
-    let index: Int
-    var id: Int { index }
+public struct OutlineEntry: Identifiable, Hashable {
+    public let level: Int          // 1…6
+    public let text: String
+    public let index: Int
+    public var id: Int { index }
+    public init(level: Int, text: String, index: Int) {
+        self.level = level
+        self.text = text
+        self.index = index
+    }
 }
 
 /// Line-based ATX heading extractor. Only `#`-style headings are recognized;
@@ -18,9 +23,9 @@ struct OutlineEntry: Identifiable, Hashable {
 /// inside sample code don't leak into the outline. Setext (`===` / `---`
 /// underline) headings are intentionally not parsed — vanishingly rare in
 /// the files we edit and cheap to add later if needed.
-enum MarkdownOutline {
+public enum MarkdownOutline {
 
-    static func headings(in body: String) -> [OutlineEntry] {
+    public static func headings(in body: String) -> [OutlineEntry] {
         var out: [OutlineEntry] = []
         var inCodeBlock = false
         var runningIndex = 0

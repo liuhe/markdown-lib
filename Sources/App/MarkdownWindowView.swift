@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownEditor
 
 /// Top-level SwiftUI shell for a `MarkdownWindowController`.
 /// Layout: [optional sidebar | (tab bar / find bar / editor)].

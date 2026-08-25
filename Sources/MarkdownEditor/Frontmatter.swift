@@ -4,7 +4,7 @@ import Foundation
 /// any unknown keys (tags, aliases, custom tool fields, nested maps) round-trip
 /// verbatim. We only reach in to pull out the values the app actually uses —
 /// currently just `title:`.
-enum Frontmatter {
+public enum Frontmatter {
 
     /// Split a raw markdown document into `(frontmatter, body)`.
     /// - Frontmatter is the text between a leading `---` line and the next
@@ -13,7 +13,7 @@ enum Frontmatter {
     ///   separator line consumed.
     /// - When there's no leading `---`, or no matching closing `---`,
     ///   returns `(nil, source)` untouched.
-    static func split(_ source: String) -> (frontmatter: String?, body: String) {
+    public static func split(_ source: String) -> (frontmatter: String?, body: String) {
         // Normalize CRLF so the line-based logic below is uniform. We emit LF
         // on assemble either way — macOS convention.
         let normalized = source.replacingOccurrences(of: "\r\n", with: "\n")
@@ -48,7 +48,7 @@ enum Frontmatter {
 
     /// Recombine frontmatter + body into a full document. Empty or nil
     /// frontmatter returns the body untouched (no `---` block written).
-    static func assemble(frontmatter: String?, body: String) -> String {
+    public static func assemble(frontmatter: String?, body: String) -> String {
         guard let fm = frontmatter,
               !fm.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return body
@@ -64,7 +64,7 @@ enum Frontmatter {
     /// Read `title:` out of a raw frontmatter block. Handles unquoted,
     /// double-quoted, and single-quoted forms. Returns nil when the key is
     /// missing or empty. Never throws — malformed YAML just yields nil.
-    static func title(in frontmatter: String) -> String? {
+    public static func title(in frontmatter: String) -> String? {
         for rawLine in frontmatter.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(rawLine)
             // Only match top-level `title:` (no leading indent — indented is
@@ -86,7 +86,7 @@ enum Frontmatter {
     ///
     /// Passing `nil` frontmatter treats it as empty (so this becomes "create
     /// a frontmatter block with just `title:`").
-    static func settingTitle(_ newTitle: String, in frontmatter: String?) -> String {
+    public static func settingTitle(_ newTitle: String, in frontmatter: String?) -> String {
         let value = encodeScalar(newTitle)
         let source = frontmatter ?? ""
         var lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)

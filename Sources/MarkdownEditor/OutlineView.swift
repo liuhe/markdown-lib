@@ -3,13 +3,18 @@ import SwiftUI
 /// Right-side outline sidebar. Shows the current tab's ATX headings,
 /// indented per level. Clicking a heading asks the editor to scroll it
 /// into view via `EditorBridge.scrollToHeading(index:)`.
-struct OutlineView: View {
-    @ObservedObject var store: DocumentStore
-    let onSelect: (Int) -> Void
+public struct OutlineView: View {
+    @ObservedObject public var store: DocumentStore
+    public let onSelect: (Int) -> Void
 
     @State private var headings: [OutlineEntry] = []
 
-    var body: some View {
+    public init(store: DocumentStore, onSelect: @escaping (Int) -> Void) {
+        self.store = store
+        self.onSelect = onSelect
+    }
+
+    public var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Text("Outline")

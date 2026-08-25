@@ -1,4 +1,5 @@
 import AppKit
+import MarkdownEditor
 import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
