@@ -6,6 +6,13 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-09-04
+
+### Added
+- Sidebar "Copy Path" context-menu item next to "Reveal in Finder"
+  (row menu, empty-area menu, and the header `+` menu). Copies the
+  absolute filesystem path to the clipboard.
+
 ## [0.15.0] - 2026-08-23
 
 ### Changed

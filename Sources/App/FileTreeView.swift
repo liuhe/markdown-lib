@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -115,6 +116,7 @@ struct FileTreeView: View {
                     Button("New Folder at Root") { onNewFolder(workspace.rootURL) }
                     Divider()
                     Button("Reveal in Finder")   { onReveal(workspace.rootURL) }
+                    Button("Copy Path")          { copyPath(workspace.rootURL) }
                 }
                 // Per-row menu is still supplied via `.contextMenu { … }` on
                 // each row, which takes precedence over this list-level menu
@@ -153,6 +155,7 @@ struct FileTreeView: View {
                 Button("New Folder at Root") { onNewFolder(workspace.rootURL) }
                 Divider()
                 Button("Reveal in Finder")   { onReveal(workspace.rootURL) }
+                Button("Copy Path")          { copyPath(workspace.rootURL) }
                 Divider()
                 Button("Refresh")            { workspace.refresh() }
             } label: {
@@ -300,6 +303,13 @@ struct FileTreeView: View {
         Button("Delete", role: .destructive) { onDelete(item.url) }
         Divider()
         Button("Reveal in Finder") { onReveal(item.url) }
+        Button("Copy Path")        { copyPath(item.url) }
+    }
+
+    private func copyPath(_ url: URL) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(url.path, forType: .string)
     }
 
     // MARK: - Keyboard
