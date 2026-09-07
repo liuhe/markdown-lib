@@ -302,14 +302,30 @@ struct FileTreeView: View {
         Button("Move to…") { onMove(item.url) }
         Button("Delete", role: .destructive) { onDelete(item.url) }
         Divider()
-        Button("Reveal in Finder") { onReveal(item.url) }
-        Button("Copy Path")        { copyPath(item.url) }
+        Button("Reveal in Finder")     { onReveal(item.url) }
+        Button("Copy Path")            { copyPath(item.url) }
+        if item.url != workspace.rootURL {
+            Button("Copy Relative Path") { copyPath(relativePath(item.url)) }
+        }
+    }
+
+    private func copyPath(_ string: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(string, forType: .string)
     }
 
     private func copyPath(_ url: URL) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(url.path, forType: .string)
+        copyPath(url.path)
+    }
+
+    private func relativePath(_ url: URL) -> String {
+        let root = workspace.rootURL.path
+        let full = url.path
+        if full == root { return "" }
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        if full.hasPrefix(prefix) { return String(full.dropFirst(prefix.count)) }
+        return full
     }
 
     // MARK: - Keyboard

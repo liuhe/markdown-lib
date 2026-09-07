@@ -6,6 +6,12 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-09-07
+
+### Added
+- Sidebar "Copy Relative Path" context-menu item (below "Copy Path")
+  that copies the file's path relative to the workspace root.
+
 ## [0.15.1] - 2026-09-04
 
 ### Added
