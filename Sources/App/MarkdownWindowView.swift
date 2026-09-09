@@ -1,6 +1,23 @@
 import SwiftUI
 import MarkdownEditor
 
+/// One-line ephemeral status message shown in the bottom-right of the editor
+/// area. `show(_:)` replaces any current toast and schedules an auto-dismiss.
+final class ToastCenter: ObservableObject {
+    @Published var message: String? = nil
+    private var dismissWorkItem: DispatchWorkItem?
+
+    func show(_ text: String, duration: TimeInterval = 2.5) {
+        dismissWorkItem?.cancel()
+        message = text
+        let work = DispatchWorkItem { [weak self] in
+            self?.message = nil
+        }
+        dismissWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+    }
+}
+
 /// Top-level SwiftUI shell for a `MarkdownWindowController`.
 /// Layout: [optional sidebar | (tab bar / find bar / editor)].
 ///
@@ -9,6 +26,7 @@ import MarkdownEditor
 /// switches. Inactive tabs are hidden and non-hit-testable.
 struct MarkdownWindowView: View {
     @ObservedObject var tabs: TabbedDocumentModel
+    @ObservedObject var toasts: ToastCenter
     let workspace: WorkspaceStore?
 
     let onOpenFileFromSidebar: (URL) -> Void
@@ -53,26 +71,34 @@ struct MarkdownWindowView: View {
                     FindBar(bridge: active.bridge).id(active.id)
                 }
 
-                ZStack {
-                    ForEach(tabs.tabs) { tab in
-                        MarkdownWebEditor(store: tab.store, bridge: tab.bridge)
-                            .opacity(tab.id == tabs.activeTab?.id ? 1 : 0)
-                            .allowsHitTesting(tab.id == tabs.activeTab?.id)
-                    }
-                    if tabs.tabs.isEmpty {
-                        Color(nsColor: .textBackgroundColor)
-                        VStack(spacing: 10) {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 40, weight: .light))
-                                .foregroundStyle(.tertiary)
-                            Text(workspace != nil
-                                 ? "Pick a file in the sidebar, or press ⌘N for a new tab."
-                                 : "Press ⌘N for a new tab or ⌘O to open a file.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
+                ZStack(alignment: .bottomTrailing) {
+                    ZStack {
+                        ForEach(tabs.tabs) { tab in
+                            MarkdownWebEditor(store: tab.store, bridge: tab.bridge)
+                                .opacity(tab.id == tabs.activeTab?.id ? 1 : 0)
+                                .allowsHitTesting(tab.id == tabs.activeTab?.id)
+                        }
+                        if tabs.tabs.isEmpty {
+                            Color(nsColor: .textBackgroundColor)
+                            VStack(spacing: 10) {
+                                Image(systemName: "doc.text")
+                                    .font(.system(size: 40, weight: .light))
+                                    .foregroundStyle(.tertiary)
+                                Text(workspace != nil
+                                     ? "Pick a file in the sidebar, or press ⌘N for a new tab."
+                                     : "Press ⌘N for a new tab or ⌘O to open a file.")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    if let message = toasts.message {
+                        ToastView(message: message)
+                            .padding(12)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                 }
+                .animation(.easeInOut(duration: 0.18), value: toasts.message)
             }
 
             if outlineVisible, let active = tabs.activeTab {
@@ -83,5 +109,22 @@ struct MarkdownWindowView: View {
             }
         }
         .frame(minWidth: workspace == nil ? 600 : 800, minHeight: 420)
+    }
+}
+
+private struct ToastView: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.system(size: 12))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.black.opacity(0.78))
+            )
+            .shadow(color: Color.black.opacity(0.25), radius: 6, y: 2)
     }
 }

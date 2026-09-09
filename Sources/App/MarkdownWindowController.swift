@@ -21,6 +21,8 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
     /// Guard so a single external-mod change per tab only prompts once.
     private var externalPromptInFlight: Set<UUID> = []
 
+    private let toasts = ToastCenter()
+
     /// Sheet we open for the workspace-file link picker; kept so we can end
     /// it from the pick / cancel callbacks.
     private weak var linkPickerSheet: NSWindow?
@@ -50,6 +52,7 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
 
         let content = MarkdownWindowView(
             tabs: tabs,
+            toasts: toasts,
             workspace: workspace,
             onOpenFileFromSidebar: { [weak self] url in self?.openInNewTab(url) },
             onCloseTab: { [weak self] idx in self?.closeTab(at: idx) },
@@ -956,15 +959,25 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
 
     private func handleExternalModification(for tab: DocumentTab, id: UUID) {
         guard !externalPromptInFlight.contains(id) else { return }
+
+        // No unsaved edits → nothing to lose, just reload silently. This also
+        // avoids a pile-up of prompts when the file changes rapidly (e.g. an
+        // external formatter writing in a loop).
+        if !tab.store.isDirty {
+            let name = tab.store.displayName
+            tab.store.revertFromDisk()
+            refreshTitleAndDocProxy()
+            toasts.show("Reloaded “\(name)”")
+            return
+        }
+
         externalPromptInFlight.insert(id)
         defer { externalPromptInFlight.remove(id) }
 
         let alert = NSAlert()
         let name = tab.store.displayName
         alert.messageText = "“\(name)” has been modified by another application."
-        alert.informativeText = tab.store.isDirty
-            ? "Reloading will discard the unsaved changes in this tab."
-            : "Reload the file to see the latest version?"
+        alert.informativeText = "Reloading will discard the unsaved changes in this tab."
         alert.addButton(withTitle: "Reload")
         alert.addButton(withTitle: "Keep Editing")
         showWindow(nil)

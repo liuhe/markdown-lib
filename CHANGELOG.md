@@ -6,6 +6,17 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-09-09
+
+### Changed
+- Externally-modified tabs with no unsaved edits now reload silently
+  and show a brief toast in the editor's bottom-right, instead of
+  interrupting with a Reload / Keep Editing dialog.
+- When the external-mod dialog *is* shown (tab has unsaved edits),
+  rapid successive file changes no longer stack multiple dialogs.
+  `DocumentStore.externallyModified` transitions to `true` idempotently
+  so Combine sinks don't refire on every poll while a modal is up.
+
 ## [0.15.2] - 2026-09-07
 
 ### Added

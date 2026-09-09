@@ -173,7 +173,9 @@ public final class DocumentStore: ObservableObject {
             return
         }
         lastKnownModDate = current
-        externallyModified = true
+        // Idempotent: repeated mtime bumps while a prompt is in-flight
+        // must not enqueue more Combine emissions on `externallyModified`.
+        if !externallyModified { externallyModified = true }
     }
 
     /// Acknowledge the external change without reloading — clears the flag.
