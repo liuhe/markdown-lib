@@ -6,6 +6,20 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-11
+
+### Added
+- Mermaid diagram rendering in the Markdown-mode preview pane.
+  Fenced code blocks with ```` ```mermaid ```` are rendered to SVG via
+  the bundled `mermaid.min.js` (11.4.1, ~2.5 MB) using Toast UI's
+  `customHTMLRenderer` hook + a debounced post-render pass. Render
+  errors surface as an inline `<pre class="mermaid-error">`.
+
+### Changed
+- Markdown mode now uses `previewStyle: 'vertical'` (split pane)
+  instead of `'tab'`, so mermaid diagrams (and other preview content)
+  are visible while editing without an extra click.
+
 ## [0.15.3] - 2026-09-09
 
 ### Changed

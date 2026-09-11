@@ -64,6 +64,8 @@ public struct MarkdownWebEditor: NSViewRepresentable {
                                subdir: "Resources/toastui") ?? ""
         let js = readResource("toastui-editor-all.min", ext: "js",
                               subdir: "Resources/toastui") ?? ""
+        let mermaidJS = readResource("mermaid.min", ext: "js",
+                                     subdir: "Resources/toastui") ?? ""
         return """
         <!DOCTYPE html>
         <html>
@@ -76,6 +78,12 @@ public struct MarkdownWebEditor: NSViewRepresentable {
         .toastui-editor-defaultUI { border: none; }
         .md-search-hit { background: rgba(255, 213, 0, 0.45); border-radius: 2px; }
         .md-search-hit-current { background: rgba(255, 149, 0, 0.75); border-radius: 2px; }
+        .mermaid-block { display: block; margin: 12px 0; padding: 8px;
+                         background: rgba(0,0,0,0.02); border-radius: 4px;
+                         text-align: center; overflow: auto; }
+        .mermaid-block svg { max-width: 100%; height: auto; }
+        .mermaid-error { color: #b00020; font-family: monospace; text-align: left;
+                         white-space: pre-wrap; }
         </style>
         </head>
         <body spellcheck="false" autocorrect="off" autocapitalize="off" translate="no">
@@ -84,12 +92,43 @@ public struct MarkdownWebEditor: NSViewRepresentable {
         \(js)
         </script>
         <script>
+        \(mermaidJS)
+        </script>
+        <script>
         (function () {
+          if (window.mermaid && typeof window.mermaid.initialize === 'function') {
+            try {
+              window.mermaid.initialize({
+                startOnLoad: false,
+                securityLevel: 'loose',
+                theme: 'default'
+              });
+            } catch (err) { /* ignore init errors */ }
+          }
+
+          // Toast UI codeBlock → mermaid renderer: emits <div class="mermaid-block">
+          // with the raw source text; runMermaid() below swaps innerHTML with SVG.
+          var mermaidRenderer = {
+            codeBlock: function (node) {
+              var info = (node.info || '').trim().toLowerCase();
+              if (info === 'mermaid') {
+                return [
+                  { type: 'openTag', tagName: 'div',
+                    classNames: ['mermaid-block'],
+                    outerNewLine: true },
+                  { type: 'text', content: node.literal || '' },
+                  { type: 'closeTag', tagName: 'div', outerNewLine: true }
+                ];
+              }
+              return null;
+            }
+          };
+
           var editor = new toastui.Editor({
             el: document.querySelector('#editor'),
             height: '100%',
             initialEditType: 'wysiwyg',
-            previewStyle: 'tab',
+            previewStyle: 'vertical',
             hideModeSwitch: false,
             usageStatistics: false,
             toolbarItems: [
@@ -99,6 +138,7 @@ public struct MarkdownWebEditor: NSViewRepresentable {
               ['table', 'link'],
               ['code', 'codeblock']
             ],
+            customHTMLRenderer: mermaidRenderer,
             // Intercept image drops / pastes: hand the blob to Swift, which
             // writes it to `<basename>.assets/paste-…` next to the current
             // file and hands us back a relative-path URL to insert.
@@ -108,6 +148,43 @@ public struct MarkdownWebEditor: NSViewRepresentable {
               }
             }
           });
+
+          // Render every unrendered <div class="mermaid-block"> in the DOM.
+          // The customHTMLRenderer emits them with source as textContent; on
+          // each preview refresh the divs are recreated, so we don't need to
+          // track staleness — just process anything not yet marked done.
+          var mermaidSeq = 0;
+          function runMermaid() {
+            if (!window.mermaid) return;
+            var blocks = document.querySelectorAll('.mermaid-block:not([data-mermaid-done])');
+            for (var i = 0; i < blocks.length; i++) {
+              (function (el) {
+                var source = el.textContent || '';
+                el.setAttribute('data-mermaid-done', '1');
+                var id = 'mermaid-' + (++mermaidSeq);
+                try {
+                  var p = window.mermaid.render(id, source);
+                  if (p && typeof p.then === 'function') {
+                    p.then(function (result) { el.innerHTML = result.svg; })
+                     .catch(function (err) {
+                       el.innerHTML = '<pre class="mermaid-error">' +
+                         String(err && err.message || err) + '</pre>';
+                     });
+                  } else if (p && p.svg) {
+                    el.innerHTML = p.svg;
+                  }
+                } catch (err) {
+                  el.innerHTML = '<pre class="mermaid-error">' +
+                    String(err && err.message || err) + '</pre>';
+                }
+              })(blocks[i]);
+            }
+          }
+          var mermaidTimer = null;
+          function scheduleMermaid() {
+            if (mermaidTimer) clearTimeout(mermaidTimer);
+            mermaidTimer = setTimeout(runMermaid, 120);
+          }
 
           var pendingImagePastes = {};
           var pastesCounter = 0;
@@ -244,6 +321,7 @@ public struct MarkdownWebEditor: NSViewRepresentable {
             window.webkit.messageHandlers.editor.postMessage({ type: 'change', md: md });
             // 内容改了就清掉当前的搜索高亮，避免残留 span
             clearSearchHighlights();
+            scheduleMermaid();
           });
 
           window.setMarkdown = function (md) {
@@ -254,6 +332,7 @@ public struct MarkdownWebEditor: NSViewRepresentable {
             suppressChange = true;
             try { editor.setMarkdown(md, false); } finally { suppressChange = false; }
             clearSearchHighlights();
+            scheduleMermaid();
           };
 
           // Toast UI 输出的 URL 里 & 被写成 &amp;（HTML 实体），做一次解码
