@@ -6,6 +6,16 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-13
+
+### Fixed
+- A blank line inserted between two list / task items (or between a
+  list and a heading, a heading and a paragraph, …) no longer vanishes
+  after save → close → reopen. Toast UI only encoded such gaps as extra
+  blank lines, which markdown collapses; the editor now serializes
+  top-level empty paragraphs as `<br>` lines and no longer strips them
+  on the way out.
+
 ## [0.16.0] - 2026-09-11
 
 ### Added

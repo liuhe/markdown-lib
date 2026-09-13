@@ -244,12 +244,68 @@ public struct MarkdownWebEditor: NSViewRepresentable {
           setTimeout(disableSpellCheckEverywhere, 250);
           setTimeout(disableSpellCheckEverywhere, 1000);
 
-          // 剥掉"整行只有 <br>"的行 —— Toast UI WYSIWYG 里空段落序列化成这个，
-          // 但反过来解析时不生成可放光标的块，会让退格跨过整段删掉上面的列表项
-          function normalizeMarkdown(md) {
-            if (typeof md !== 'string') return md;
-            return md.replace(/^[ \\t]*<br\\s*\\/?>[ \\t]*(\\r?\\n|$)/gim, '');
-          }
+          // BEGIN paragraph-serializer
+          // Make empty paragraphs survive a save/reload round trip.
+          //
+          // Toast UI's stock WYSIWYG→markdown paragraph convertor writes a
+          // *lone* empty paragraph as nothing but extra blank lines. That
+          // works between two paragraphs (its md→WYSIWYG side turns
+          // "a\\n\\nb" back into a/empty/b) but is lost everywhere else —
+          // between two lists, list→heading, heading→paragraph, … — so the
+          // blank line a user inserts between two task items vanishes on
+          // reopen. Only the 2nd+ empty paragraph in a run ever got a
+          // "<br>" line.
+          //
+          // We swap in a run-aware convertor for *top-level* empty
+          // paragraphs (parent is the doc). Anything nested (list items,
+          // block quotes, table cells) still goes through Toast UI's own
+          // code. Encoding, verified against Toast UI's parser:
+          //   - first empty after a paragraph, followed by a paragraph or
+          //     more empties → "\\n" (the classic blank-line trick)
+          //   - every other empty → "<br>" line
+          //   - the last empty in a run gets a blank line after it when the
+          //     next block is not a paragraph, so "<br>" can't swallow a
+          //     "---" (setext heading) or a "2." list that can't interrupt
+          //     a paragraph.
+          // Trailing empties at the end of the document are left to Toast
+          // UI (dropped on reload) so files don't grow a "<br>" tail.
+          //
+          // `swift scripts/roundtrip-probe.swift` replays the round-trip
+          // matrix against this exact block; re-run it if you touch the
+          // encoding — the md→WYSIWYG side has surprising rules (a
+          // paragraph that follows a paragraph gets a bonus empty).
+          (function installParagraphSerializer() {
+            var conv = editor.convertor && editor.convertor.toMdConvertors;
+            var map = conv && conv.nodeTypeConvertors;
+            if (!map || typeof map.paragraph !== 'function') return;
+            var orig = map.paragraph;
+            function isEmptyPara(n) {
+              return !!n && n.type.name === 'paragraph' && n.childCount === 0;
+            }
+            map.paragraph = function (state, ctx) {
+              var node = ctx.node, parent = ctx.parent, index = ctx.index || 0;
+              if (state.stopNewline || !parent || parent.type.name !== 'doc'
+                  || index === 0 || node.childCount !== 0) {
+                return orig(state, ctx);
+              }
+              var prev = parent.child(index - 1);
+              var j = index + 1;
+              while (j < parent.childCount && isEmptyPara(parent.child(j))) j++;
+              var target = j < parent.childCount ? parent.child(j) : null;
+              if (!target) return orig(state, ctx);
+              var firstInRun = !isEmptyPara(prev);
+              var lastInRun = j === index + 1;
+              var targetIsPara = target.type.name === 'paragraph';
+              if (firstInRun && prev.type.name === 'paragraph' && (targetIsPara || !lastInRun)) {
+                state.write('\\n');
+                return;
+              }
+              state.write('<br>');
+              if (lastInRun && !targetIsPara) state.closeBlock(node);
+              else state.write('\\n');
+            };
+          })();
+          // END paragraph-serializer
 
           // 拿当前 WYSIWYG 编辑区的 ProseMirror 根节点
           function wwRoot() {
@@ -304,18 +360,12 @@ public struct MarkdownWebEditor: NSViewRepresentable {
           var suppressChange = false;
           editor.on('change', function () {
             if (suppressChange) return;
-            var raw = editor.getMarkdown();
-            // Normalize on the *outbound* markdown only — DO NOT feed the
-            // normalized copy back into the editor via setMarkdown. Doing so
-            // rebuilds the DOM and wipes any empty paragraph the user just
-            // created by pressing Enter (Toast UI serializes empty <p><br></p>
-            // as a bare "<br>" line, which normalizeMarkdown strips).
-            //
-            // Trade-off: if the "backspace-after-paste eats a list item"
-            // bug that used to be fixed here resurfaces, handle it in a more
-            // targeted spot (paste event or an explicit Backspace keydown
-            // interceptor) instead of on every change.
-            var md = normalizeMarkdown(raw);
+            // Ship the serializer's output verbatim — "<br>" lines are
+            // how empty paragraphs survive a reload (see the paragraph
+            // serializer above). Do NOT feed anything back into the editor
+            // via setMarkdown here; that rebuilds the DOM and wipes the
+            // empty paragraph the user just made with Enter.
+            var md = editor.getMarkdown();
             if (md === lastPushed) return;
             lastPushed = md;
             window.webkit.messageHandlers.editor.postMessage({ type: 'change', md: md });
@@ -326,7 +376,6 @@ public struct MarkdownWebEditor: NSViewRepresentable {
 
           window.setMarkdown = function (md) {
             if (typeof md !== 'string') return;
-            md = normalizeMarkdown(md);
             if (editor.getMarkdown() === md) return;
             lastPushed = md;
             suppressChange = true;

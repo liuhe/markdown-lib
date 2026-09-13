@@ -132,15 +132,23 @@ persist as bogus spans in the exported markdown.
    and burned 20–50% idle CPU. Body-level inheritance is enough; if a
    specific mode ever needs re-assertion, hook the specific event.
 
-5. **`<br>` normalization is outbound-only.** Toast UI Editor serializes
-   empty paragraphs as a bare `<br>` on their own line. `normalizeMarkdown`
-   strips those lines from the string we hand to Swift so the on-disk file
-   is clean, but do NOT feed the normalized copy back into the editor via
-   `setMarkdown` on every change — that rebuilds the DOM and destroys
-   whatever empty paragraph the user just made with Enter. The old code
-   did this to also fix a "backspace-after-paste eats the previous list
-   item" bug; if that comes back, handle it at the paste event or via a
-   Backspace keydown interceptor, not by round-tripping every keystroke.
+5. **Empty paragraphs round-trip as `<br>` lines — on purpose.** Toast
+   UI's stock WYSIWYG→markdown paragraph convertor writes a *lone* empty
+   paragraph as nothing but blank lines, which only survives a reload
+   between two paragraphs; between two lists, list→heading, etc. the
+   gap is silently lost. `installParagraphSerializer` in
+   `MarkdownWebEditor.swift` swaps in a run-aware convertor for
+   top-level empty paragraphs that emits `<br>` lines (see the comment
+   block there for the exact encoding, and which contexts are left to
+   Toast UI). We used to strip `<br>` lines on the way out
+   (`normalizeMarkdown`); that's gone — the `<br>` *is* the persisted
+   blank line. Do NOT reintroduce stripping, and do NOT feed any
+   rewritten markdown back into the editor via `setMarkdown` on
+   `change` — that rebuilds the DOM and wipes the empty paragraph the
+   user just made with Enter. If you touch the encoding, re-run
+   `swift scripts/roundtrip-probe.swift` (headless WKWebView, extracts
+   the serializer straight from the Swift source) — the md→WYSIWYG side
+   has surprising rules.
 
 6. **URL entity decoding.** Toast UI Editor emits hrefs with `&amp;` in
    place of `&`. Both the JS side (before posting to Swift) and the Swift
