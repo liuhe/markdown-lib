@@ -50,6 +50,26 @@ final class WorkspaceStore: ObservableObject {
     @Published private(set) var rootURL: URL
     @Published private(set) var root: FileNode
 
+    /// A one-shot "select + scroll to this node" request for the sidebar.
+    /// Set by `requestReveal(_:)` right after a file op; `FileTreeView`
+    /// consumes it once the node shows up in `root` (scans are async, so the
+    /// freshly created item usually isn't in the tree yet when the request
+    /// is made). `serial` makes back-to-back requests for the same URL
+    /// distinguishable to `onChange`.
+    struct RevealRequest: Equatable {
+        let url: URL
+        let serial: UInt64
+    }
+    @Published private(set) var revealRequest: RevealRequest?
+    private var revealSerial: UInt64 = 0
+
+    /// Ask the sidebar to expand ancestors of, select, and scroll to `url`
+    /// as soon as it appears in the tree.
+    func requestReveal(_ url: URL) {
+        revealSerial &+= 1
+        revealRequest = RevealRequest(url: url, serial: revealSerial)
+    }
+
     private var watcher: FileTreeWatcher?
 
     /// File extensions that get the "file-folder" treatment (may adopt a

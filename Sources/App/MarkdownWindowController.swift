@@ -672,6 +672,7 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
                                        confirm: "Create") else { return }
         do {
             let url = try workspace.createFile(under: parent, name: name)
+            workspace.requestReveal(url)
             openInNewTab(url)
         } catch {
             appDelegate?.presentError(error)
@@ -684,8 +685,10 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
                                        message: "Enter a folder name.",
                                        initial: "New Folder",
                                        confirm: "Create") else { return }
-        do { _ = try workspace.createFolder(under: parent, name: name) }
-        catch { appDelegate?.presentError(error) }
+        do {
+            let url = try workspace.createFolder(under: parent, name: name)
+            workspace.requestReveal(url)
+        } catch { appDelegate?.presentError(error) }
     }
 
     func promptRename(_ url: URL) {

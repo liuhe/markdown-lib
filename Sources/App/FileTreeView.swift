@@ -35,6 +35,11 @@ struct FileTreeView: View {
     @State private var selected: URL?
     @FocusState private var focused: Bool
 
+    /// URL the sidebar still owes a reveal for (see
+    /// `WorkspaceStore.requestReveal`). Kept until the node actually shows
+    /// up in `workspace.root`, since the post-create rescan is async.
+    @State private var pendingReveal: URL?
+
     // MARK: - Flattened items
 
     /// One visible row in the sidebar. Depth drives indentation; the flat
@@ -94,33 +99,46 @@ struct FileTreeView: View {
             Divider()
 
             let flat = items
-            List(flat, selection: $selected) { item in
-                row(for: item, allItems: flat)
-                    .tag(item.url)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 6))
-            }
-            .listStyle(.sidebar)
-            .focused($focused)
-            .onKeyPress(.leftArrow)  { handleLeft(items: flat);   return .handled }
-            .onKeyPress(.rightArrow) { handleRight(items: flat);  return .handled }
-            .onKeyPress(.return)     { handleActivate(items: flat); return .handled }
-            .onKeyPress(.space)      { handleActivate(items: flat); return .handled }
-            // Empty-area right-click. When SwiftUI picks up the click over
-            // an actual row it also routes through this menu with `urls`
-            // set to the row's URL — mirror the per-row menu in that case
-            // so we don't accidentally drop the row context menu.
-            .contextMenu(forSelectionType: URL.self) { urls in
-                if urls.isEmpty {
-                    Button("New File at Root")   { onNewFile(workspace.rootURL) }
-                    Button("New Folder at Root") { onNewFolder(workspace.rootURL) }
-                    Divider()
-                    Button("Reveal in Finder")   { onReveal(workspace.rootURL) }
-                    Button("Copy Path")          { copyPath(workspace.rootURL) }
+            ScrollViewReader { proxy in
+                List(flat, selection: $selected) { item in
+                    row(for: item, allItems: flat)
+                        .tag(item.url)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 6))
                 }
-                // Per-row menu is still supplied via `.contextMenu { … }` on
-                // each row, which takes precedence over this list-level menu
-                // when the click is on a row.
+                .listStyle(.sidebar)
+                .focused($focused)
+                .onKeyPress(.leftArrow)  { handleLeft(items: flat);   return .handled }
+                .onKeyPress(.rightArrow) { handleRight(items: flat);  return .handled }
+                .onKeyPress(.return)     { handleActivate(items: flat); return .handled }
+                .onKeyPress(.space)      { handleActivate(items: flat); return .handled }
+                // Empty-area right-click. When SwiftUI picks up the click over
+                // an actual row it also routes through this menu with `urls`
+                // set to the row's URL — mirror the per-row menu in that case
+                // so we don't accidentally drop the row context menu.
+                .contextMenu(forSelectionType: URL.self) { urls in
+                    if urls.isEmpty {
+                        Button("New File at Root")   { onNewFile(workspace.rootURL) }
+                        Button("New Folder at Root") { onNewFolder(workspace.rootURL) }
+                        Divider()
+                        Button("Reveal in Finder")   { onReveal(workspace.rootURL) }
+                        Button("Copy Path")          { copyPath(workspace.rootURL) }
+                    }
+                    // Per-row menu is still supplied via `.contextMenu { … }` on
+                    // each row, which takes precedence over this list-level menu
+                    // when the click is on a row.
+                }
+                // Reveal-after-create: the request usually arrives before the
+                // rescan has published the new node, so remember it and retry
+                // every time the tree changes until it lands.
+                .onChange(of: workspace.revealRequest) { _, req in
+                    guard let req else { return }
+                    pendingReveal = req.url
+                    drainPendingReveal(proxy)
+                }
+                .onChange(of: workspace.root) { _, _ in
+                    drainPendingReveal(proxy)
+                }
             }
         }
     }
@@ -177,29 +195,65 @@ struct FileTreeView: View {
     /// works correctly.
     private func revealActiveInTree() {
         guard let target = activeFileURL else { return }
-        guard let chain = Self.ancestorURLs(of: target, in: workspace.root) else {
-            // Not in the current tree (maybe a loose file was opened, or the
-            // tree hasn't finished scanning yet).
-            return
+        _ = reveal(target, scrollWith: nil)
+    }
+
+    /// Try to satisfy `pendingReveal` against the current tree. No-op while
+    /// the node hasn't appeared yet; clears the request once it has.
+    private func drainPendingReveal(_ proxy: ScrollViewProxy) {
+        guard let target = pendingReveal else { return }
+        if reveal(target, scrollWith: proxy) {
+            pendingReveal = nil
         }
+    }
+
+    /// Expand every ancestor of `target`, select it, focus the list and
+    /// (optionally) scroll it into view. Returns false when `target` isn't
+    /// in the tree yet (loose file, scan still running, ignored dir…).
+    ///
+    /// A directory that the scan folded into a same-basename markdown file
+    /// (`X/` next to `X.md`) has no row of its own; in that case the
+    /// file-folder row is revealed instead.
+    @discardableResult
+    private func reveal(_ target: URL, scrollWith proxy: ScrollViewProxy?) -> Bool {
+        guard let (node, chain) = Self.locate(target, in: workspace.root) else { return false }
         for url in chain where url != workspace.root.url {
             expanded.insert(url)
         }
-        selected = target
+        selected = node.url
         focused = true
+        if let proxy {
+            // Let the expansion re-render the flat list before scrolling,
+            // otherwise the row may not exist yet.
+            DispatchQueue.main.async {
+                withAnimation { proxy.scrollTo(node.url, anchor: .center) }
+            }
+        }
+        return true
     }
 
-    /// Depth-first search that returns the URLs of every FileNode on the
-    /// path from `node` to a descendant matching `target`, ordered from
-    /// deepest ancestor first (nearest to target) up to `node`.
+    /// Depth-first search for `target` — matched by node URL, or by a
+    /// file-folder's companion directory URL. Returns the matching node
+    /// plus the URLs of every FileNode on the path from `node` down to it,
+    /// ordered from deepest ancestor first (nearest to target) up to `node`.
     /// Returns nil if `target` is not reachable from `node`.
-    private static func ancestorURLs(of target: URL, in node: FileNode) -> [URL]? {
-        if node.url == target { return [] }
+    ///
+    /// Compared by standardized path, not URL equality: the scanner's URLs
+    /// carry a trailing slash for directories (and may resolve `/tmp` →
+    /// `/private/tmp`), while URLs built by the file ops don't.
+    private static func locate(_ target: URL, in node: FileNode) -> (FileNode, [URL])? {
+        locate(path: target.standardizedFileURL.path, in: node)
+    }
+
+    private static func locate(path: String, in node: FileNode) -> (FileNode, [URL])? {
+        if node.url.standardizedFileURL.path == path
+            || node.companionDirectoryURL?.standardizedFileURL.path == path {
+            return (node, [])
+        }
         guard let children = node.children else { return nil }
         for c in children {
-            if c.url == target { return [node.url] }
-            if let sub = ancestorURLs(of: target, in: c) {
-                return sub + [node.url]
+            if let (found, sub) = locate(path: path, in: c) {
+                return (found, sub + [node.url])
             }
         }
         return nil

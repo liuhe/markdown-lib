@@ -6,6 +6,15 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-09-13
+
+### Added
+- Sidebar "New File" / "New Folder" now reveal the item they created:
+  every ancestor is expanded, the new row is selected and scrolled into
+  view. The reveal waits for the async rescan to publish the node, and
+  a folder that gets folded into a same-basename markdown file
+  (`X/` next to `X.md`) reveals that file-folder row instead.
+
 ## [0.16.1] - 2026-09-13
 
 ### Fixed
