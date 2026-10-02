@@ -6,6 +6,8 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-02
+
 ### Changed
 - Image requests that miss next to the document fall back to the
   workspace root; misses are logged under subsystem `markdown-lib`,
