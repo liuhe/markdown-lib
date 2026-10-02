@@ -332,8 +332,9 @@ persist as bogus spans in the exported markdown.
     The WebContent process can be replaced under us (crash, jetsam, a
     WebKit process swap on older macOS). The page reloads and posts
     `ready` again, but the text hasn't changed, so the `push` dedupe
-    used to skip it and the editor sat blank — this is what "reopen a
-    saved file and it's empty" was on an Intel iMac. `case "ready"`
+    used to skip it and the editor sat blank. (The Intel-iMac "reopen a
+    saved file and it's empty" report turned out to be gotcha 28, but
+    this hole was real and is closed too.) `case "ready"`
     clears `lastPushed` before pushing; `webViewWebContentProcessDidTerminate`
     reloads the HTML and lets the following `ready` repopulate. In-editor
     undo history is lost on that path, the text is not (it lives in
@@ -352,6 +353,22 @@ persist as bogus spans in the exported markdown.
     `log stream … --level debug`; `log show` won't have them unless
     persistence was enabled. Note `log` is a zsh builtin — use
     `/usr/bin/log` in scripts.
+
+28. **Toast UI's md→WYSIWYG `htmlBlock` convertor throws on HTML
+    blocks that don't start with a tag.** `<?xml …?>`, `<!DOCTYPE html>`,
+    `<![CDATA[`, an unterminated `<!--` — CommonMark HTML block types
+    2–5 — hit `n.match(ga)[1]` with a null match and the whole
+    `setMarkdown` aborts, leaving an empty editor. Pasting such text
+    *works* (it's just a paragraph in ProseMirror), the markdown
+    serializer writes it verbatim, and the crash only fires on the next
+    open — a textbook "saves fine, reopens blank". `guardHtmlBlockConvertor`
+    in `MarkdownWebEditor.swift` wraps `editor.convertor.toWwConvertors.htmlBlock`
+    and falls back to a plain paragraph holding the literal.
+    `window.setMarkdown` additionally catches any conversion failure,
+    posts a `jsError`, and switches to markdown mode so the user sees
+    *something*. Known Toast UI limitation we did not fix: unknown tags
+    in a type-7 HTML block (`<root/>`) are dropped by its DOM-parser
+    path on reload — raw XML belongs in a code fence.
 
 ## Versioning + releases
 

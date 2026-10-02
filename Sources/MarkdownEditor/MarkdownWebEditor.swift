@@ -303,6 +303,30 @@ public struct MarkdownWebEditor: NSViewRepresentable {
           setTimeout(disableSpellCheckEverywhere, 250);
           setTimeout(disableSpellCheckEverywhere, 1000);
 
+          // BEGIN htmlBlock-guard
+          // Toast UI's md→WYSIWYG `htmlBlock` convertor assumes the block
+          // starts with a tag or a complete comment. A line such as
+          // `<?xml …?>`, `<!DOCTYPE html>`, `<![CDATA[` or an unterminated
+          // `<!--` (CommonMark HTML block types 2–5) makes it throw
+          // "null is not an object (evaluating 'o[1]')", and setMarkdown
+          // aborts with an empty document — the user sees a blank editor
+          // for a file that pasted and saved fine. Keep the literal as a
+          // plain paragraph instead; it round-trips to markdown unchanged.
+          (function guardHtmlBlockConvertor() {
+            var conv = editor.convertor && editor.convertor.toWwConvertors;
+            if (!conv || typeof conv.htmlBlock !== 'function') return;
+            var orig = conv.htmlBlock;
+            conv.htmlBlock = function (state, node) {
+              try { return orig.apply(this, arguments); }
+              catch (err) {
+                state.openNode(state.schema.nodes.paragraph);
+                state.addText(node.literal || '');
+                state.closeNode();
+              }
+            };
+          })();
+          // END htmlBlock-guard
+
           // BEGIN paragraph-serializer
           // Make empty paragraphs survive a save/reload round trip.
           //
@@ -438,7 +462,21 @@ public struct MarkdownWebEditor: NSViewRepresentable {
             if (editor.getMarkdown() === md) return;
             lastPushed = md;
             suppressChange = true;
-            try { editor.setMarkdown(md, false); } finally { suppressChange = false; }
+            try { editor.setMarkdown(md, false); }
+            catch (err) {
+              // Conversion failed; the editor is now empty. Report it and
+              // fall back to markdown mode, which needs no WYSIWYG
+              // conversion, so the user still sees their document.
+              try {
+                window.webkit.messageHandlers.editor.postMessage({
+                  type: 'jsError', message: 'setMarkdown failed: ' + String(err && err.message || err),
+                  where: 'setMarkdown', stack: err && err.stack ? String(err.stack) : ''
+                });
+                editor.changeMode('markdown', true);
+                editor.setMarkdown(md, false);
+              } catch (err2) {}
+            }
+            finally { suppressChange = false; }
             clearSearchHighlights();
             scheduleMermaid();
           };

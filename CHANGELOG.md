@@ -6,6 +6,20 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.4] - 2026-10-02
+
+### Fixed
+- A document containing an HTML block that starts with `<?xml`,
+  `<!DOCTYPE`, `<![CDATA[` or an unterminated `<!--` (CommonMark HTML
+  block types 2–5) opened as a blank editor: Toast UI's markdown →
+  WYSIWYG `htmlBlock` convertor threw `null is not an object
+  (evaluating 'o[1]')` and the whole conversion aborted. Such text
+  pastes and saves fine, so the failure only showed on reopen. The
+  convertor is now guarded and keeps the block as a plain paragraph
+  (the text round-trips unchanged). If conversion still fails for any
+  other reason, the editor reports the error to the system log and
+  falls back to markdown mode instead of showing nothing.
+
 ## [0.17.3] - 2026-10-02
 
 ### Changed
