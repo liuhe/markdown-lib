@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import AppKit
+import os
 
 /// WKWebView + Toast UI Editor WYSIWYG markdown editor.
 ///
@@ -919,7 +920,25 @@ public struct MarkdownWebEditor: NSViewRepresentable {
         var pendingMarkdown: String?
         var lastPushed = ""
 
+        var readyCount = 0
+        private static let log = Logger(subsystem: "markdown-lib", category: "editor")
+
         init(_ parent: MarkdownWebEditor) { self.parent = parent }
+
+        /// The WebContent process died (crash, memory pressure, …). The
+        /// view is blank until something reloads it, so reload the editor
+        /// page; the `ready` message that follows re-pushes the document.
+        /// Undo history inside the editor is lost, the text is not — it
+        /// lives in `DocumentStore`.
+        public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            Self.log.error("WebContent process terminated for \(self.parent.store.fileURL?.lastPathComponent ?? "untitled", privacy: .public); reloading editor page")
+            ready = false
+            parent.bridge.isEditorReady = false
+            lastPushed = ""
+            pendingMarkdown = parent.store.text
+            webView.loadHTMLString(MarkdownWebEditor.buildInlinedHTML(),
+                                   baseURL: DocumentAssetSchemeHandler.baseURL)
+        }
 
         // Intercept every navigation: allow the initial `about:` load; any
         // other URL (http/https/file) routes through `openLinkedHref`.
@@ -1069,8 +1088,17 @@ public struct MarkdownWebEditor: NSViewRepresentable {
                   let type = dict["type"] as? String else { return }
             switch type {
             case "ready":
+                readyCount += 1
+                if readyCount > 1 {
+                    Self.log.error("editor page posted ready again (#\(self.readyCount)) — WebContent process was replaced; re-pushing document")
+                }
                 ready = true
                 parent.bridge.isEditorReady = true
+                // A fresh WebContent process (crash, jetsam, process swap)
+                // reloads the page and posts `ready` again. Clear the push
+                // dedupe so the document is sent even though its text hasn't
+                // changed — otherwise the new editor stays empty.
+                lastPushed = ""
                 let md = pendingMarkdown ?? parent.store.text
                 if let wv = webView { push(md, to: wv) }
                 pendingMarkdown = nil

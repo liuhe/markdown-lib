@@ -328,6 +328,19 @@ persist as bogus spans in the exported markdown.
     can pick their own policy. The returned MIME can change (HEIC/WebP/
     TIFF → PNG), so the extension is derived *after* downscaling.
 
+26. **Every `ready` re-pushes; `lastPushed` is not a document cache.**
+    The WebContent process can be replaced under us (crash, jetsam, a
+    WebKit process swap on older macOS). The page reloads and posts
+    `ready` again, but the text hasn't changed, so the `push` dedupe
+    used to skip it and the editor sat blank — this is what "reopen a
+    saved file and it's empty" was on an Intel iMac. `case "ready"`
+    clears `lastPushed` before pushing; `webViewWebContentProcessDidTerminate`
+    reloads the HTML and lets the following `ready` repopulate. In-editor
+    undo history is lost on that path, the text is not (it lives in
+    `DocumentStore`). Both events log to subsystem `markdown-lib`,
+    category `editor` — ask for `log stream --predicate 'subsystem ==
+    "markdown-lib"'` when someone reports a blank editor.
+
 ## Versioning + releases
 
 - `VERSION` is the single source of truth. `make-app-bundle.sh` stamps both

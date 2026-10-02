@@ -6,6 +6,16 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-10-02
+
+### Fixed
+- Editor no longer stays blank after its WebContent process is replaced
+  (crash, memory pressure, or a WebKit process swap). The Swift side
+  deduped pushes by text, so the fresh page's second `ready` never
+  received the document. Every `ready` now re-pushes, and a terminated
+  process triggers a reload of the editor page. Both events are logged
+  under subsystem `markdown-lib`, category `editor`.
+
 ## [0.17.1] - 2026-10-02
 
 ### Changed
