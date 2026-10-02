@@ -35,10 +35,11 @@ public struct MarkdownWebEditor: NSViewRepresentable {
         // `mdasset://doc/`; the handler maps them onto the directory of
         // the current file so pasted images (`![](x.assets/…)`) render.
         let store = self.store
+        let bridge = self.bridge
         config.setURLSchemeHandler(
-            DocumentAssetSchemeHandler(baseDirectory: { [weak store] in
-                store?.fileURL?.deletingLastPathComponent()
-            }),
+            DocumentAssetSchemeHandler(
+                baseDirectory: { [weak store] in store?.fileURL?.deletingLastPathComponent() },
+                rootDirectory: { [weak bridge] in bridge?.workspaceRootURL }),
             forURLScheme: DocumentAssetSchemeHandler.scheme)
         // Right-click → Inspect Element / Cmd+Alt+I opens the Web Inspector.
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
@@ -46,7 +47,6 @@ public struct MarkdownWebEditor: NSViewRepresentable {
         let webView = DropForwardingWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
         webView.navigationDelegate = context.coordinator
-        let bridge = self.bridge
         webView.dropHandler = { [weak bridge] url in
             bridge?.onDropURL?(url)
         }

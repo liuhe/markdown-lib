@@ -1,6 +1,7 @@
 import Foundation
 import WebKit
 import UniformTypeIdentifiers
+import os
 
 /// Serves document-relative resources (pasted images, `![](x.png)`
 /// references, …) to the editor's WKWebView.
@@ -25,13 +26,22 @@ final class DocumentAssetSchemeHandler: NSObject, WKURLSchemeHandler {
     /// relative paths against, or `nil` when there's no saved document.
     private let baseDirectory: () -> URL?
 
+    /// Secondary base: the workspace root (if any). Tried when the
+    /// document-relative candidate doesn't exist, mirroring the link
+    /// resolver's root-relative fallback.
+    private let rootDirectory: () -> URL?
+
+    private static let log = Logger(subsystem: "markdown-lib", category: "assets")
+
     /// Tasks WebKit hasn't cancelled yet. `WKURLSchemeTask` throws if you
     /// call `didReceive` / `didFinish` after `stop`, so the async file
     /// read checks membership before replying.
     private var liveTasks = Set<ObjectIdentifier>()
 
-    init(baseDirectory: @escaping () -> URL?) {
+    init(baseDirectory: @escaping () -> URL?,
+         rootDirectory: @escaping () -> URL? = { nil }) {
         self.baseDirectory = baseDirectory
+        self.rootDirectory = rootDirectory
     }
 
     /// Map an `mdasset://doc/<rel>` URL to a filesystem URL under `base`.
@@ -47,21 +57,35 @@ final class DocumentAssetSchemeHandler: NSObject, WKURLSchemeHandler {
         let id = ObjectIdentifier(task)
         liveTasks.insert(id)
 
-        guard let url = task.request.url,
-              let base = baseDirectory(),
-              let fileURL = Self.resolve(url, base: base) else {
+        guard let url = task.request.url else {
+            fail(task, code: NSURLErrorBadURL)
+            return
+        }
+        let base = baseDirectory()
+        let root = rootDirectory()
+        var candidates: [URL] = []
+        if let base, let u = Self.resolve(url, base: base) { candidates.append(u) }
+        if let root, let u = Self.resolve(url, base: root), !candidates.contains(u) {
+            candidates.append(u)
+        }
+        guard !candidates.isEmpty else {
+            Self.log.error("asset \(url.absoluteString, privacy: .public): no base directory (document unsaved?)")
             fail(task, code: NSURLErrorFileDoesNotExist)
             return
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
             var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir),
-                  !isDir.boolValue,
+            guard let fileURL = candidates.first(where: {
+                      FileManager.default.fileExists(atPath: $0.path, isDirectory: &isDir) && !isDir.boolValue
+                  }),
                   let data = try? Data(contentsOf: fileURL) else {
+                let tried = candidates.map(\.path).joined(separator: " | ")
+                Self.log.error("asset \(url.absoluteString, privacy: .public): not found; tried \(tried, privacy: .public)")
                 DispatchQueue.main.async { self.fail(task, code: NSURLErrorFileDoesNotExist) }
                 return
             }
+            Self.log.debug("asset \(url.absoluteString, privacy: .public) -> \(fileURL.path, privacy: .public) (\(data.count) B)")
             let mime = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType
                 ?? "application/octet-stream"
             DispatchQueue.main.async {
