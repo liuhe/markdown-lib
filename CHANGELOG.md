@@ -6,6 +6,16 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-10-02
+
+### Changed
+- Diagnostics: page-side JavaScript errors are forwarded to the system
+  log, and one second after each document push the editor logs an
+  `info`-level snapshot (OS version, view size, editor mode, paragraph
+  count, per-image load state and rendered size) under subsystem
+  `markdown-lib`, category `editor`. Read with
+  `log stream --predicate 'subsystem == "markdown-lib"' --level debug`.
+
 ## [0.17.2] - 2026-10-02
 
 ### Fixed

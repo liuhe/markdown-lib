@@ -341,6 +341,18 @@ persist as bogus spans in the exported markdown.
     category `editor` — ask for `log stream --predicate 'subsystem ==
     "markdown-lib"'` when someone reports a blank editor.
 
+27. **Remote diagnosis goes through the unified log, not the Web
+    Inspector.** Subsystem `markdown-lib`: category `assets` logs every
+    `mdasset://` hit (debug) / miss (error); category `editor` logs
+    page JS errors (`window.onerror` → `jsError` message), WebContent
+    termination, repeated `ready`, and a `diag` snapshot ~1 s after
+    each push (`window.mdDiagnostics()`: mode, paragraph count,
+    ProseMirror rect, viewport, per-image `[src, complete, naturalWidth,
+    rendered w, rendered h]`). Debug/info lines only appear with
+    `log stream … --level debug`; `log show` won't have them unless
+    persistence was enabled. Note `log` is a zsh builtin — use
+    `/usr/bin/log` in scripts.
+
 ## Versioning + releases
 
 - `VERSION` is the single source of truth. `make-app-bundle.sh` stamps both

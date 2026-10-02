@@ -104,6 +104,29 @@ public struct MarkdownWebEditor: NSViewRepresentable {
         <body spellcheck="false" autocorrect="off" autocapitalize="off" translate="no">
         <div id="editor"></div>
         <script>
+        // Surface page-side failures in the host's system log (see
+        // Coordinator's `jsError` case) — a blank editor on a machine we
+        // can't inspect is otherwise undiagnosable.
+        window.onerror = function (msg, src, line, col, err) {
+          try {
+            window.webkit.messageHandlers.editor.postMessage({
+              type: 'jsError', message: String(msg),
+              where: String(src || '') + ':' + line + ':' + col,
+              stack: err && err.stack ? String(err.stack) : ''
+            });
+          } catch (e) {}
+        };
+        window.addEventListener('unhandledrejection', function (ev) {
+          try {
+            var r = ev && ev.reason;
+            window.webkit.messageHandlers.editor.postMessage({
+              type: 'jsError', message: 'unhandledrejection: ' + String(r && r.message || r),
+              where: '', stack: r && r.stack ? String(r.stack) : ''
+            });
+          } catch (e) {}
+        });
+        </script>
+        <script>
         \(js)
         </script>
         <script>
@@ -200,6 +223,27 @@ public struct MarkdownWebEditor: NSViewRepresentable {
             if (mermaidTimer) clearTimeout(mermaidTimer);
             mermaidTimer = setTimeout(runMermaid, 120);
           }
+
+          // Snapshot of what the page actually shows; the host logs this
+          // a moment after each document push.
+          window.mdDiagnostics = function () {
+            var pm = document.querySelector('.toastui-editor-ww-container .ProseMirror');
+            var r = pm ? pm.getBoundingClientRect() : null;
+            var imgs = Array.prototype.slice.call(document.querySelectorAll('.ProseMirror img[src], .toastui-editor-contents img[src]'));
+            var out = {
+              mode: (typeof editor.isWysiwygMode === 'function') ? (editor.isWysiwygMode() ? 'wysiwyg' : 'markdown') : '?',
+              mdLen: editor.getMarkdown().length,
+              pmChildren: pm ? pm.childElementCount : -1,
+              pmRect: r ? [Math.round(r.width), Math.round(r.height)] : null,
+              viewport: [window.innerWidth, window.innerHeight],
+              visibility: document.visibilityState,
+              imgs: imgs.slice(0, 20).map(function (i) {
+                var b = i.getBoundingClientRect();
+                return [i.getAttribute('src'), i.complete, i.naturalWidth, Math.round(b.width), Math.round(b.height)];
+              })
+            };
+            return JSON.stringify(out);
+          };
 
           var pendingImagePastes = {};
           var pastesCounter = 0;
@@ -1112,6 +1156,11 @@ public struct MarkdownWebEditor: NSViewRepresentable {
                         }
                     }
                 }
+            case "jsError":
+                let msg = (dict["message"] as? String) ?? "?"
+                let whereStr = (dict["where"] as? String) ?? ""
+                let stack = (dict["stack"] as? String) ?? ""
+                Self.log.error("page error: \(msg, privacy: .public) @ \(whereStr, privacy: .public) \(stack, privacy: .public)")
             case "openLink":
                 if let s = dict["url"] as? String {
                     openLinkedHref(s)
@@ -1141,6 +1190,24 @@ public struct MarkdownWebEditor: NSViewRepresentable {
             lastPushed = md
             let js = "window.setMarkdown(\(jsQuote(md)));"
             webView.evaluateJavaScript(js, completionHandler: nil)
+            scheduleDiagnostics(md.utf8.count, on: webView)
+        }
+
+        /// Log what the page shows ~1 s after a push: OS version, view
+        /// geometry, and the DOM snapshot from `window.mdDiagnostics`.
+        private func scheduleDiagnostics(_ bytes: Int, on webView: WKWebView) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self, weak webView] in
+                guard let self, let webView else { return }
+                let os = ProcessInfo.processInfo.operatingSystemVersionString
+                let bounds = "\(Int(webView.bounds.width))x\(Int(webView.bounds.height))"
+                let inWindow = webView.window != nil
+                let hidden = webView.isHiddenOrHasHiddenAncestor
+                let name = self.parent.store.fileURL?.lastPathComponent ?? "untitled"
+                webView.evaluateJavaScript("window.mdDiagnostics ? window.mdDiagnostics() : 'no-diagnostics'") { result, error in
+                    let snapshot = (result as? String) ?? "error: \(error.map { String(describing: $0) } ?? "nil")"
+                    Self.log.info("diag \(name, privacy: .public): os=\(os, privacy: .public) pushed=\(bytes)B view=\(bounds, privacy: .public) inWindow=\(inWindow) hidden=\(hidden) page=\(snapshot, privacy: .public)")
+                }
+            }
         }
 
         private func jsQuote(_ s: String) -> String {
