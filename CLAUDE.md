@@ -58,6 +58,8 @@ before the split).
 | `FileLinkPicker.swift` | `WorkspaceFilePicker` — modal SwiftUI sheet listing workspace markdown files with a search field + fuzzy scoring; drives both `⌘P` Go to File… and `⇧⌘K` Insert Link to File…. |
 | `MarkdownOutline.swift` | Line-based ATX heading parser (skips fenced code blocks + 4-space-indented lines). Feeds the right-side outline sidebar. |
 | `OutlineView.swift` | Right-side outline sidebar (per active tab). Toggled via View → Show Outline (`⌥⌘0`), persisted with `@AppStorage("OutlineVisible")`. Click a heading → `EditorBridge.scrollToHeading(index:)` → JS `mdScrollToHeading(n)` which scrolls the Nth `<h1>…<h6>` element into view. |
+| `DocumentAssetSchemeHandler.swift` | `WKURLSchemeHandler` for `mdasset://doc/…`. The editor page is loaded with that base URL; relative `<img src>` requests are resolved against `store.fileURL`'s directory per request and streamed with `Cache-Control: no-store`. |
+| `PastedImage.swift` | `downscaled(_:mime:maxWidth:)` — ImageIO thumbnail that caps pixel *width* (not the larger dimension), honors EXIF orientation, keeps JPEG as JPEG and re-encodes the rest as PNG. GIF / SVG pass through. |
 | `MarkdownWebEditor.swift` | `NSViewRepresentable` around a WKWebView. Loads inlined Toast UI Editor HTML/JS/CSS. Coordinator handles the JS ↔ Swift bridge (`webkit.messageHandlers.editor`). Takes a `DocumentStore` (`@ObservedObject`), not a `Binding<String>`. |
 
 ## The web-view bridge
@@ -302,6 +304,29 @@ persist as bogus spans in the exported markdown.
     carries it); not-open file → raw read/write. The three paths keep
     the on-disk state and the sidebar consistent without ever
     silently-saving a user's dirty edits.
+
+24. **The editor page's base URL is `mdasset://doc/`, not `nil`.**
+    `loadHTMLString(_, baseURL: nil)` gave the page an `about:blank`
+    origin, so every relative `![](x.assets/p.png)` was a broken image —
+    the user saw pasted screenshots as a bare `image` placeholder.
+    `DocumentAssetSchemeHandler` serves `mdasset://doc/<rel>` from the
+    current file's directory. Consequences: (a) `decidePolicyFor` must
+    `.allow` exactly `mdasset://doc/` (the initial load) and treat any
+    other `mdasset` URL as an absolutized relative link — strip the base
+    back off and hand it to `openLinkedHref`; the JS click interceptor
+    already posts `getAttribute('href')`, so this only matters for the
+    nav-delegate fallback. (b) Absolute `file://` subresources are
+    blocked by WebKit from this origin — don't "fix" untitled-tab pastes
+    by inserting `file://` URLs and expecting them to render.
+    (c) `WKURLSchemeTask` throws if you reply after `stop` — the handler
+    tracks live task ids; keep that if you touch the async read.
+
+25. **Pasted images are downscaled to ≤ 512 px wide in the app, not the
+    library.** `MarkdownWindowController.saveImagePaste` calls
+    `PastedImage.downscaled` before writing; the library's
+    `handleImagePaste` passes the blob through untouched so other hosts
+    can pick their own policy. The returned MIME can change (HEIC/WebP/
+    TIFF → PNG), so the extension is derived *after* downscaling.
 
 ## Versioning + releases
 

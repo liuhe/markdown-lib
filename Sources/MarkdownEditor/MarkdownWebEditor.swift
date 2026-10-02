@@ -6,7 +6,10 @@ import AppKit
 ///
 /// The underlying storage stays as markdown text; the WKWebView provides
 /// the rich-text editing surface. CSS/JS are inlined into the HTML and
-/// handed to `loadHTMLString` so we sidestep `file://` CORS.
+/// handed to `loadHTMLString` so we sidestep `file://` CORS. The page's
+/// base URL is `mdasset://doc/`, a custom scheme served by
+/// `DocumentAssetSchemeHandler` that resolves relative image paths
+/// against the current document's directory.
 ///
 /// Host apps get callbacks via `bridge.onOpenLink` / `onDropURL` /
 /// `onPasteImage`; the editor never reaches into `NSApp.delegate` or
@@ -28,6 +31,15 @@ public struct MarkdownWebEditor: NSViewRepresentable {
 
         let config = WKWebViewConfiguration()
         config.userContentController = controller
+        // Relative `src` / `href` in the DOM resolve against
+        // `mdasset://doc/`; the handler maps them onto the directory of
+        // the current file so pasted images (`![](x.assets/…)`) render.
+        let store = self.store
+        config.setURLSchemeHandler(
+            DocumentAssetSchemeHandler(baseDirectory: { [weak store] in
+                store?.fileURL?.deletingLastPathComponent()
+            }),
+            forURLScheme: DocumentAssetSchemeHandler.scheme)
         // Right-click → Inspect Element / Cmd+Alt+I opens the Web Inspector.
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
@@ -41,7 +53,8 @@ public struct MarkdownWebEditor: NSViewRepresentable {
         context.coordinator.webView = webView
         bridge.webView = webView
 
-        webView.loadHTMLString(Self.buildInlinedHTML(), baseURL: nil)
+        webView.loadHTMLString(Self.buildInlinedHTML(),
+                               baseURL: DocumentAssetSchemeHandler.baseURL)
         return webView
     }
 
@@ -82,6 +95,7 @@ public struct MarkdownWebEditor: NSViewRepresentable {
                          background: rgba(0,0,0,0.02); border-radius: 4px;
                          text-align: center; overflow: auto; }
         .mermaid-block svg { max-width: 100%; height: auto; }
+        .toastui-editor-contents img { max-width: 100%; height: auto; }
         .mermaid-error { color: #b00020; font-family: monospace; text-align: left;
                          white-space: pre-wrap; }
         </style>
@@ -918,6 +932,20 @@ public struct MarkdownWebEditor: NSViewRepresentable {
             }
             if url.scheme == "about" {
                 decisionHandler(.allow)
+                return
+            }
+            // The editor page itself lives at `mdasset://doc/` (see
+            // `DocumentAssetSchemeHandler`). Anything else under that
+            // scheme is a relative link the browser absolutized — strip
+            // the base back off and route it like a relative href.
+            if url.scheme?.lowercased() == DocumentAssetSchemeHandler.scheme {
+                if url.absoluteString == DocumentAssetSchemeHandler.baseURL.absoluteString {
+                    decisionHandler(.allow)
+                    return
+                }
+                let rel = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
+                openLinkedHref(rel.isEmpty ? url.absoluteString : rel)
+                decisionHandler(.cancel)
                 return
             }
             // If the navigation somehow slips past the JS Cmd+click handler,

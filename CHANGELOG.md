@@ -6,6 +6,21 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-02
+
+### Fixed
+- Pasted / dropped images now render inline in the editor instead of
+  showing as a broken `![image](…)` placeholder. The editor page is
+  served from a custom `mdasset://doc/` base URL whose scheme handler
+  resolves relative `src` paths against the current file's directory,
+  so existing `![](x.assets/…)` references in saved documents render too.
+
+### Changed
+- Images wider than 512 px are downscaled on paste before being written
+  to `<basename>.assets/` (aspect ratio and EXIF orientation preserved;
+  JPEG stays JPEG, other raster formats become PNG; GIF / SVG untouched).
+- Images wider than the editor pane are shrunk to fit (`max-width: 100%`).
+
 ## [0.16.2] - 2026-09-13
 
 ### Added

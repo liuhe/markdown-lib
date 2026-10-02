@@ -129,8 +129,8 @@ struct MyEditor: View {
 
 The library exports `MarkdownWebEditor`, `EditorBridge`, `DocumentStore`,
 `Frontmatter`, `MarkdownOutline` / `OutlineView`, `FindBar`,
-`RelativePath`, and `PerfLog` — no window / tab / workspace / recents
-code.
+`RelativePath`, `PastedImage`, and `PerfLog` — no window / tab / workspace /
+recents code.
 
 For host-app responsibilities, image-paste policy, frontmatter/metadata usage,
 shortcut recommendations, and multi-tab gotchas, see

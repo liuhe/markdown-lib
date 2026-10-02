@@ -155,6 +155,21 @@ the document is untitled, the library can only insert an absolute `file://` URL.
 For portable markdown, the recommended behavior is to reject image paste until
 the document has been saved.
 
+Relative image paths render inline: the editor page is loaded with the base
+URL `mdasset://doc/`, and `DocumentAssetSchemeHandler` resolves every
+`mdasset://doc/<rel>` request against the directory of `store.fileURL`. The
+markdown keeps the plain relative path; a Save As re-targets subsequent
+loads automatically. Absolute `file://` image URLs are *not* served (WebKit
+blocks them from a non-file origin), which is one more reason to require a
+saved document before accepting pastes.
+
+To keep Retina screenshots from bloating the assets folder, run the blob
+through `PastedImage.downscaled(_:mime:maxWidth:)` before writing it. Images
+wider than `maxWidth` are resized (aspect preserved, EXIF orientation
+honored); JPEG stays JPEG, everything else is re-encoded as PNG, and GIF /
+SVG pass through untouched. The returned `mime` may differ from the input,
+so derive the extension from it.
+
 Recommended `markdown-lib`-compatible policy:
 
 - Require the markdown document to have a saved `fileURL` first.
@@ -164,6 +179,8 @@ Recommended `markdown-lib`-compatible policy:
   <basename>.assets/paste-yyyymmdd-HHmmss.ext
   ```
 
+- Downscale with `PastedImage.downscaled(_:mime:maxWidth:)`
+  (`PastedImage.defaultMaxWidth` is 512).
 - Use `MarkdownWebEditor.extensionForMIME(_:)` to choose the extension.
 - On filename collision, append `-2`, `-3`, etc.
 - Write atomically.
@@ -172,10 +189,12 @@ Recommended `markdown-lib`-compatible policy:
 Example:
 
 ```swift
-bridge.onPasteImage = { data, mime in
+bridge.onPasteImage = { rawData, rawMime in
     guard let sourceURL = store.fileURL else {
         return nil
     }
+    let (data, mime) = PastedImage.downscaled(
+        rawData, mime: rawMime, maxWidth: PastedImage.defaultMaxWidth)
 
     let assetsDir = sourceURL
         .deletingPathExtension()

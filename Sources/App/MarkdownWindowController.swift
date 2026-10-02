@@ -483,10 +483,14 @@ final class MarkdownWindowController: NSWindowController, NSWindowDelegate {
 
     /// Save an image blob next to the current file inside
     /// `<basename>.assets/paste-yyyymmdd-HHmmss.ext`, appending `-N` on
-    /// collision. Returns the on-disk URL; the library relativizes it
+    /// collision. Images wider than `PastedImage.defaultMaxWidth` (512 px)
+    /// are downscaled first so Retina screenshots don't bloat the assets
+    /// folder. Returns the on-disk URL; the library relativizes it
     /// against the tab's fileURL before handing back to Toast UI.
     /// Untitled tabs get a "save this file first" alert.
-    static func saveImagePaste(data: Data, mime: String, tab: DocumentTab?) -> URL? {
+    static func saveImagePaste(data rawData: Data, mime rawMime: String, tab: DocumentTab?) -> URL? {
+        let (data, mime) = PastedImage.downscaled(rawData, mime: rawMime,
+                                                  maxWidth: PastedImage.defaultMaxWidth)
         guard let sourceURL = tab?.store.fileURL else {
             DispatchQueue.main.async {
                 let alert = NSAlert()
